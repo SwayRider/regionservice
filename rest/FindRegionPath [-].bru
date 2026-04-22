@@ -1,0 +1,23 @@
+meta {
+  name: FindRegionPath [*]
+  type: http
+  seq: 8
+}
+
+post {
+  url: {{REGIONSERVICE_HOST}}:{{REGIONSERVICE_PORT}}/api/v1/region/find-region-path
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "from_region": "iberian-peninsula",
+    "to_region": "west-europe"
+  }
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

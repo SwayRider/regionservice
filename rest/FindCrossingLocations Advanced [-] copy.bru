@@ -1,0 +1,72 @@
+meta {
+  name: FindCrossingLocations Advanced [*] copy
+  type: http
+  seq: 7
+}
+
+post {
+  url: {{REGIONSERVICE_HOST}}:{{REGIONSERVICE_PORT}}/api/v1/region/find-crossing-locations
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "from_region": "west-europe",
+    "to_region": "iberian-peninsula",
+    "from_location": {
+      "lat": 44.817726967338125,
+      "lon": -0.5772785825495158
+    },
+    "to_location": {
+      "lat": 41.651236077303665,
+      "lon": -0.8907861749898216
+    },
+    "advanced_config": {
+      "definitions": [
+        {
+          "max_border_distance": 5000,
+          "road_type_order": [
+            "SECONDARY",
+            "PRIMARY",
+            "TRUNK",
+            "MOTORWAY"
+          ],
+          "road_type_delta": 5000
+        },
+        {
+          "max_border_distance": 10000,
+          "road_type_order": [
+            "PRIMARY",
+            "SECONDARY",
+            "TRUNK",
+            "MOTORWAY"
+          ],
+          "road_type_delta": 10000
+        },
+        {
+          "max_border_distance": 50000,
+          "road_type_order": [
+            "MOTORWAY",
+            "TRUNK",
+            "PRIMARY"
+          ],
+          "road_type_delta": 50000
+        },
+        {
+          "max_border_distance": 0,
+          "road_type_order": [
+            "MOTORWAY",
+            "TRUNK"
+          ]
+        }
+      ]
+    },
+    "limit": 3
+  }
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

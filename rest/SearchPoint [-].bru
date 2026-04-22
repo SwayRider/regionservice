@@ -1,0 +1,26 @@
+meta {
+  name: SearchPoint [*]
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{REGIONSERVICE_HOST}}:{{REGIONSERVICE_PORT}}/api/v1/region/search-point
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "location": {
+      "lat": 42.90737207237733,
+      "lon": 0.4849465967024218
+    },
+    "include_extended": true
+  }
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

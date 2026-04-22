@@ -1,0 +1,16 @@
+meta {
+  name: Ping [*]
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{REGIONSERVICE_HOST}}:{{REGIONSERVICE_PORT}}/api/v1/health/ping
+  body: none
+  auth: inherit
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}
