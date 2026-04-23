@@ -19,7 +19,7 @@ None beyond the geodata volume mount.
 
 On startup, the service loads geodata from the local filesystem based on a manifest file:
 
-1. Fetches the manifest for the configured tag
+1. Reads `manifest.yml` from `GEODATA_DIR`
 2. Loads core and extended contours for each region into the **Region Index**
 3. Loads border crossing points into the **Border Index**
 
@@ -37,17 +37,17 @@ Configuration is provided via environment variables or CLI flags.
 | -------------------- | -------- | ------- | ----------- |
 | `HTTP_PORT` | `-http-port` | 8080 | REST API port |
 | `GRPC_PORT` | `-grpc-port` | 8081 | gRPC port |
+| `LOG_LEVEL` | `-log-level` | info | Log verbosity level |
 
 ### Geodata Configuration
 
 | Environment Variable | CLI Flag | Default | Description |
 | -------------------- | -------- | ------- | ----------- |
-| `GEODATA_DIR` | `-geodata-dir` | | Root directory containing versioned geodata (volume mount) |
-| `TAG` | `-tag` | | Tag/version subdirectory to load (empty = latest) |
+| `GEODATA_DIR` | `-geodata-dir` | | Root directory containing geodata (volume mount) |
 
 ## API Reference
 
-The API is defined in the Protocol Buffer files at `backend/protos/region/v1/` and `backend/protos/health/v1/`.
+The API is defined in the Protocol Buffer files at `protos/region/v1/` and `protos/health/v1/`.
 
 All endpoints are public and require no authentication.
 
@@ -61,6 +61,23 @@ Simple health check that returns HTTP 200.
 
 - **Endpoint:** `GET /api/v1/health/ping`
 - **Access:** Public
+
+#### Health Check
+
+Returns the health status of the service or a specific component.
+
+- **Endpoint:** `GET /api/v1/health`
+- **Access:** Public
+- **Query parameter:** `component` (optional) — check a specific component; omit for overall service status
+
+Response:
+```json
+{
+  "status": "UP"
+}
+```
+
+`status` values: `UNKNOWN`, `UP`, `DOWN`
 
 ---
 
@@ -218,10 +235,14 @@ Response:
 Simple configuration (`simpleConfig`):
 - `roadTypeOrder`: Preferred road types in order (MOTORWAY, TRUNK, PRIMARY, SECONDARY)
 - `roadTypeDelta`: Distance threshold for road type preference (meters)
-- `dropDistance`: Minimum distance between returned crossings (meters)
+- `dropDistance`: Minimum distance between returned crossings (meters; default: `0.1 × roadTypeDelta`)
 
 Advanced configuration (`advancedConfig`):
-- `definitions`: Array of distance-based configurations for different border distances
+- `definitions`: Array of distance-based configurations, selected by proximity to the closest crossing
+  - `maxBorderDistance`: Upper distance bound (meters) for this definition; `0` acts as a fallback for all distances
+  - `roadTypeOrder`: Preferred road types in order
+  - `roadTypeDelta`: Distance threshold for road type preference (meters)
+  - `dropDistance`: Minimum distance between returned crossings (meters; default: `0.1 × roadTypeDelta`)
 
 #### Find Region Path
 
@@ -247,30 +268,20 @@ Response:
 }
 ```
 
----
-
-### Ping
-
-Simple endpoint that returns HTTP 200.
-
-- **Endpoint:** `GET /api/v1/region/ping`
-- **Access:** Public
-
 ## Geodata Structure
 
 The geodata directory must be mounted at the path configured by `GEODATA_DIR`. It follows this structure:
 
 ```
 <GEODATA_DIR>/
-└── <tag>/                        # Version tag, e.g. 2025-12-01
-    ├── manifest.yml              # Manifest describing available regions
-    ├── contours/
-    │   ├── iberian-peninsula-core.geojson
-    │   ├── iberian-peninsula-extended.geojson
-    │   └── ...
-    └── border-crossings/
-        ├── iberian-peninsula--west-europe.csv
-        └── ...
+├── manifest.yml                  # Manifest describing available regions
+├── contours/
+│   ├── iberian-peninsula-core.geojson
+│   ├── iberian-peninsula-extended.geojson
+│   └── ...
+└── border-crossings/
+    ├── iberian-peninsula--west-europe.csv
+    └── ...
 ```
 
 ### Region Types
@@ -281,22 +292,22 @@ The geodata directory must be mounted at the path configured by `GEODATA_DIR`. I
 ## Building
 
 ```bash
-# Generate protobuf code (run from repo root)
-make proto
+# Generate protobuf code (run from protos/ directory)
+cd protos && make
 
-# Build the service
-cd backend
-go build ./services/regionservice/cmd/regionservice
+# Build the service (run from regionservice/ directory)
+cd regionservice
+go build ./cmd/regionservice
 
 # Run the service
-go run ./services/regionservice/cmd/regionservice
+go run ./cmd/regionservice
 ```
 
 ## Docker
 
 ```bash
-# Build container (from repo root)
-make services-regionservice-container
+# Build container (from regionservice/ directory)
+docker build -t regionservice .
 ```
 
 ## Development
