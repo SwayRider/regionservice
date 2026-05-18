@@ -27,6 +27,21 @@ The service maintains two in-memory spatial indexes:
 - **Region Index**: R-tree based index for fast point-in-polygon and bounding box queries
 - **Border Index**: Index of border crossing locations between adjacent regions
 
+## Authorization
+
+| gRPC endpoint | Access |
+|---|---|
+| `/health.v1.HealthService/Ping` | Public — no token required |
+| `/region.v1.RegionService/SearchPoint` | User JWT **or** service client token with `region:query` scope |
+| `/region.v1.RegionService/SearchBox` | User JWT **or** service client token with `region:query` scope |
+| `/region.v1.RegionService/SearchRadius` | User JWT **or** service client token with `region:query` scope |
+| `/region.v1.RegionService/FindCrossingLocations` | User JWT **or** service client token with `region:query` scope |
+| `/region.v1.RegionService/FindRegionPath` | User JWT **or** service client token with `region:query` scope |
+
+Service clients (e.g. swayrider-api) must obtain a token from authservice using their `clientId` and `clientSecret`, then pass it as `Authorization: Bearer <token>` in the gRPC call metadata.
+
+---
+
 ## Configuration
 
 Configuration is provided via environment variables or CLI flags.
