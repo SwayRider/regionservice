@@ -9,7 +9,7 @@ require (
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0
 	github.com/paulmach/orb v0.13.0
 	github.com/swayrider/protos v0.1.1
-	github.com/swayrider/swlib v0.1.2-0.20260513190938-e9124987785d
+	github.com/swayrider/swlib v0.1.2
 	google.golang.org/grpc v1.80.0
 	gopkg.in/yaml.v3 v3.0.1
 )
@@ -29,14 +29,13 @@ require (
 	github.com/hashicorp/golang-lru v0.5.4 // indirect
 	github.com/hashicorp/serf v0.10.1 // indirect
 	github.com/joho/godotenv v1.5.1 // indirect
-	github.com/kr/text v0.2.0 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mitchellh/go-homedir v1.1.0 // indirect
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
 	github.com/rs/cors v1.11.1 // indirect
-	github.com/stretchr/testify v1.11.1 // indirect
-	github.com/swayrider/grpcclients v0.1.2-0.20260513193630-fb9b503de3d0 // indirect
+	github.com/stretchr/objx v0.5.2 // indirect
+	github.com/swayrider/grpcclients v0.1.2 // indirect
 	golang.org/x/exp v0.0.0-20250305212735-054e65f0b394 // indirect
 	golang.org/x/net v0.49.0 // indirect
 	golang.org/x/sys v0.40.0 // indirect
