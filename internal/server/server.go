@@ -9,7 +9,8 @@
 //   - FindCrossingLocations: Find border crossings between two regions
 //   - FindRegionPath: Find a path of regions from source to destination
 //
-// All endpoints are registered as public (no authentication required).
+// All RegionService endpoints require a user JWT or a service client token with
+// the "region:query" scope. The health ping endpoint is public.
 package server
 
 import (
@@ -20,13 +21,14 @@ import (
 	"github.com/swayrider/regionservice/internal/index"
 )
 
-// init registers all endpoints as public (no authentication required).
+// init registers endpoint authorization. All RegionService endpoints require a
+// valid user JWT or a service client token with the "region:query" scope.
 func init() {
-	security.PublicEndpoint("/region.v1.RegionService/SearchPoint")
-	security.PublicEndpoint("/region.v1.RegionService/SearchBox")
-	security.PublicEndpoint("/region.v1.RegionService/SearchRadius")
-	security.PublicEndpoint("/region.v1.RegionService/FindCrossingLocations")
-	security.PublicEndpoint("/region.v1.RegionService/FindRegionPath")
+	security.UserOrServiceEndpoint("/region.v1.RegionService/SearchPoint", []string{"region:query"})
+	security.UserOrServiceEndpoint("/region.v1.RegionService/SearchBox", []string{"region:query"})
+	security.UserOrServiceEndpoint("/region.v1.RegionService/SearchRadius", []string{"region:query"})
+	security.UserOrServiceEndpoint("/region.v1.RegionService/FindCrossingLocations", []string{"region:query"})
+	security.UserOrServiceEndpoint("/region.v1.RegionService/FindRegionPath", []string{"region:query"})
 
 	security.PublicEndpoint("/health.v1.HealthService/Ping")
 }
