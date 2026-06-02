@@ -8,8 +8,8 @@ require (
 	github.com/gocarina/gocsv v0.0.0-20240520201108-78e41c74b4b1
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0
 	github.com/paulmach/orb v0.13.0
-	github.com/swayrider/protos v0.1.1
-	github.com/swayrider/swlib v0.1.3
+	github.com/swayrider/protos v0.1.2
+	github.com/swayrider/swlib v0.1.4
 	google.golang.org/grpc v1.80.0
 	gopkg.in/yaml.v3 v3.0.1
 )
@@ -35,7 +35,7 @@ require (
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
 	github.com/rs/cors v1.11.1 // indirect
 	github.com/stretchr/objx v0.5.2 // indirect
-	github.com/swayrider/grpcclients v0.1.2 // indirect
+	github.com/swayrider/grpcclients v0.1.4 // indirect
 	golang.org/x/exp v0.0.0-20250305212735-054e65f0b394 // indirect
 	golang.org/x/net v0.49.0 // indirect
 	golang.org/x/sys v0.40.0 // indirect
