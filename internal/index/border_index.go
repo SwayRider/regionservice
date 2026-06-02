@@ -264,6 +264,134 @@ func (i *BorderIndex) FindRegionPath(
 }
 
 
+const maxPathLengthMultiplier = 2
+
+// FindRouteRegionPaths finds all acyclic paths from fromRegion to toRegion
+// that are constrained to the provided set of allowed regions.
+// Uses iterative DFS; path length is bounded at maxPathLengthMultiplier times
+// the shortest allowed BFS path to prevent exponential exploration.
+// Returns nil if no path exists within the allowed set.
+func (i *BorderIndex) FindRouteRegionPaths(
+	ctx context.Context,
+	fromRegion, toRegion string,
+	allowedRegions map[string]bool,
+) [][]string {
+	if !allowedRegions[fromRegion] || !allowedRegions[toRegion] {
+		return nil
+	}
+
+	shortest := i.findShortestAllowedPath(fromRegion, toRegion, allowedRegions)
+	if shortest == nil {
+		return nil
+	}
+	maxLen := len(shortest) * maxPathLengthMultiplier
+
+	var results [][]string
+	stack := [][]string{{fromRegion}}
+
+	for len(stack) > 0 {
+		path := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+
+		last := path[len(path)-1]
+
+		if last == toRegion {
+			results = append(results, path)
+			continue
+		}
+
+		if len(path) >= maxLen {
+			continue
+		}
+
+		for neighbor := range i.regionCrossings[last] {
+			if !allowedRegions[neighbor] {
+				continue
+			}
+			if regionInPath(path, neighbor) {
+				continue
+			}
+			newPath := make([]string, len(path)+1)
+			copy(newPath, path)
+			newPath[len(path)] = neighbor
+			stack = append(stack, newPath)
+		}
+	}
+
+	return results
+}
+
+// findShortestAllowedPath is a BFS that finds the shortest path from fromRegion
+// to toRegion considering only regions in allowed.
+func (i *BorderIndex) findShortestAllowedPath(
+	fromRegion, toRegion string,
+	allowed map[string]bool,
+) []string {
+	toMap, ok := i.regionCrossings[fromRegion]
+	if !ok {
+		return nil
+	}
+
+	passed := make(map[string]struct{})
+	endpoints := make(map[string][]string)
+
+	for neighbor := range toMap {
+		if !allowed[neighbor] {
+			continue
+		}
+		endpoints[neighbor] = []string{fromRegion, neighbor}
+		passed[neighbor] = struct{}{}
+	}
+
+	if path, ok := endpoints[toRegion]; ok {
+		return path
+	}
+
+	for {
+		numAdded := 0
+		newEndpoints := make(map[string][]string)
+
+		for region, list := range endpoints {
+			toMap, ok := i.regionCrossings[region]
+			if !ok {
+				continue
+			}
+			for neighbor := range toMap {
+				if _, seen := passed[neighbor]; seen {
+					continue
+				}
+				if !allowed[neighbor] {
+					continue
+				}
+				newEndpoints[neighbor] = append([]string{}, list...)
+				newEndpoints[neighbor] = append(newEndpoints[neighbor], neighbor)
+				passed[neighbor] = struct{}{}
+				numAdded++
+			}
+		}
+
+		if numAdded == 0 {
+			break
+		}
+		endpoints = newEndpoints
+	}
+
+	if path, ok := endpoints[toRegion]; ok {
+		return path
+	}
+	return nil
+}
+
+// regionInPath reports whether region already appears in path.
+func regionInPath(path []string, region string) bool {
+	for _, r := range path {
+		if r == region {
+			return true
+		}
+	}
+	return false
+}
+
 // add inserts a border crossing into the region crossings map.
 func (rc *RegionCrossings) add(bc *BorderCrossing) {
 	toMap, ok := (*rc)[bc.FromRegion]

@@ -189,7 +189,7 @@ func (i RegionIndex) SearchByBox(
 	)
 
 	var coreCands, extCands []rtreego.Spatial
-	coreCands = i.extendedRtree.SearchIntersect(box)
+	coreCands = i.coreRtree.SearchIntersect(box)
 	if extended {
 		extCands = i.extendedRtree.SearchIntersect(box)
 	}

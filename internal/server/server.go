@@ -8,6 +8,7 @@
 //   - SearchRadius: Find regions within a radius of a point
 //   - FindCrossingLocations: Find border crossings between two regions
 //   - FindRegionPath: Find a path of regions from source to destination
+//   - FindRouteRegionPaths: Find all corridor-constrained region paths for a polyline
 //
 // All RegionService endpoints require a user JWT or a service client token with
 // the "region:query" scope. The health ping endpoint is public.
@@ -29,6 +30,7 @@ func init() {
 	security.UserOrServiceEndpoint("/region.v1.RegionService/SearchRadius", []string{"region:query"})
 	security.UserOrServiceEndpoint("/region.v1.RegionService/FindCrossingLocations", []string{"region:query"})
 	security.UserOrServiceEndpoint("/region.v1.RegionService/FindRegionPath", []string{"region:query"})
+	security.UserOrServiceEndpoint("/region.v1.RegionService/FindRouteRegionPaths", []string{"region:query"})
 
 	security.PublicEndpoint("/health.v1.HealthService/Ping")
 }
