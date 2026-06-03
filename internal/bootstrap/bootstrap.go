@@ -48,7 +48,9 @@ func Bootstrap(
 			return err
 		}
 
-		regionIndex.Add(regionName, coreFC, extendedFC)
+		if err := regionIndex.Add(regionName, coreFC, extendedFC); err != nil {
+			return err
+		}
 	}
 
 	for _, crossing := range manifest.Shared.BorderCrossings {

@@ -32,7 +32,11 @@ func (r *GeoDataReader) GetContour(
 		lg.Warnf("failed to open %s: %v", path, err)
 		return
 	}
-	defer f.Close()
+	defer func() {
+		if cerr := f.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}()
 
 	bytes, err := io.ReadAll(f)
 	if err != nil {
