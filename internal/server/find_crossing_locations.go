@@ -211,7 +211,7 @@ func (s *RegionServer) findCrossingLocationsAdvanced(
 // Returns the crossing that is closer to the line's start or end point.
 func closestCrossing(
 	ctx context.Context,
-	borderIndex *index.BorderIndex,
+	borderIndex BorderQuerier,
 	fromRegion, toRegion string,
 	line orb.LineString,
 ) (*index.ClosestBorderCrossing, error) {

@@ -15,12 +15,32 @@
 package server
 
 import (
+	"context"
+
+	"github.com/paulmach/orb"
 	regionv1 "github.com/swayrider/protos/region/v1"
 	healthv1 "github.com/swayrider/protos/health/v1"
 	log "github.com/swayrider/swlib/logger"
 	"github.com/swayrider/swlib/security"
 	"github.com/swayrider/regionservice/internal/index"
 )
+
+// RegionQuerier abstracts spatial region lookups.
+// *index.RegionIndex satisfies this interface.
+type RegionQuerier interface {
+	SearchByPoint(p orb.Point, extended bool) []*index.RegionResult
+	SearchByBox(bottomLeft, topRight orb.Point, extended bool) []*index.RegionResult
+	SearchByRadius(center orb.Point, radiusKm float64, extended bool) []*index.RegionResult
+}
+
+// BorderQuerier abstracts border crossing lookups.
+// *index.BorderIndex satisfies this interface.
+type BorderQuerier interface {
+	FindCrossingLocations(ctx context.Context, fromRegion, toRegion string, line orb.LineString, roadOrder []string, limit int, roadTypeDelta, dropDistance float64) []*index.BorderCrossingResult
+	FindClosestCrossing(ctx context.Context, fromRegion, toRegion string, location orb.Point, validRoadTypes []string) *index.ClosestBorderCrossing
+	FindRegionPath(ctx context.Context, fromRegion, toRegion string) []string
+	FindRouteRegionPaths(ctx context.Context, fromRegion, toRegion string, allowedRegions map[string]bool) [][]string
+}
 
 // init registers endpoint authorization. All RegionService endpoints require a
 // valid user JWT or a service client token with the "region:query" scope.
@@ -38,15 +58,15 @@ func init() {
 // RegionServer implements the RegionService gRPC interface.
 type RegionServer struct {
 	regionv1.UnimplementedRegionServiceServer
-	regionIndex *index.RegionIndex // Spatial index for region lookups
-	borderIndex *index.BorderIndex // Index for border crossing lookups
-	l           *log.Logger        // Logger instance
+	regionIndex RegionQuerier // Spatial index for region lookups
+	borderIndex BorderQuerier // Index for border crossing lookups
+	l           *log.Logger   // Logger instance
 }
 
 // NewRegionServer creates a new RegionServer with the given indices.
 func NewRegionServer(
-	regionIndex *index.RegionIndex,
-	borderIndex *index.BorderIndex,
+	regionIndex RegionQuerier,
+	borderIndex BorderQuerier,
 	l *log.Logger,
 ) *RegionServer {
 	return &RegionServer{
@@ -60,12 +80,12 @@ func NewRegionServer(
 }
 
 // RegionIndex returns the server's region spatial index.
-func (s RegionServer) RegionIndex() *index.RegionIndex {
+func (s RegionServer) RegionIndex() RegionQuerier {
 	return s.regionIndex
 }
 
 // BorderIndex returns the server's border crossing index.
-func (s RegionServer) BorderIndex() *index.BorderIndex {
+func (s RegionServer) BorderIndex() BorderQuerier {
 	return s.borderIndex
 }
 
