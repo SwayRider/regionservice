@@ -13,7 +13,7 @@ The regionservice exposes two server interfaces:
 
 ### Dependencies
 
-None beyond the geodata volume mount.
+- **authservice** — JWT public keys for verifying incoming tokens (fetched periodically and cached).
 
 ### Data Loading
 
@@ -37,6 +37,7 @@ The service maintains two in-memory spatial indexes:
 | `/region.v1.RegionService/SearchRadius` | User JWT **or** service client token with `region:query` scope |
 | `/region.v1.RegionService/FindCrossingLocations` | User JWT **or** service client token with `region:query` scope |
 | `/region.v1.RegionService/FindRegionPath` | User JWT **or** service client token with `region:query` scope |
+| `/region.v1.RegionService/FindRouteRegionPaths` | User JWT **or** service client token with `region:query` scope |
 
 Service clients (e.g. swayrider-api) must obtain a token from authservice using their `clientId` and `clientSecret`, then pass it as `Authorization: Bearer <token>` in the gRPC call metadata.
 
@@ -53,6 +54,8 @@ Configuration is provided via environment variables or CLI flags.
 | `HTTP_PORT` | `-http-port` | 8080 | REST API port |
 | `GRPC_PORT` | `-grpc-port` | 8081 | gRPC port |
 | `LOG_LEVEL` | `-log-level` | info | Log verbosity level |
+| `AUTHSERVICE_HOST` | `-authservice-host` | | authservice host for JWT public key fetching |
+| `AUTHSERVICE_PORT` | `-authservice-port` | | authservice gRPC port for JWT public key fetching |
 
 ### Geodata Configuration
 
@@ -64,7 +67,7 @@ Configuration is provided via environment variables or CLI flags.
 
 The API is defined in the Protocol Buffer files at `protos/region/v1/` and `protos/health/v1/`.
 
-All endpoints are public and require no authentication.
+Access to each endpoint follows the Authorization table above.
 
 ---
 
