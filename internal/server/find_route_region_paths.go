@@ -40,6 +40,11 @@ func (s *RegionServer) FindRouteRegionPaths(
 	if req.WidthKm <= 0 {
 		return nil, status.Error(codes.InvalidArgument, "width_km must be positive")
 	}
+	for _, wp := range req.Waypoints {
+		if err := validateCoordinate(wp, "waypoints"); err != nil {
+			return nil, err
+		}
+	}
 
 	allowedRegions := make(map[string]bool)
 	for idx := 0; idx < len(req.Waypoints)-1; idx++ {

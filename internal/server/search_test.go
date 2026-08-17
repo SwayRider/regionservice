@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"math"
 	"testing"
 
 	"github.com/paulmach/orb"
@@ -175,6 +176,72 @@ func TestSearchRadius_Success(t *testing.T) {
 	}
 	if len(resp.CoreRegions) != 1 || resp.CoreRegions[0] != "Austria" {
 		t.Errorf("CoreRegions = %v, want [Austria]", resp.CoreRegions)
+	}
+}
+
+// =============================================================================
+// Input validation tests (point 3)
+// =============================================================================
+
+func TestSearchPoint_InvalidLatitude(t *testing.T) {
+	s := newTestRegionServer(&mockRegionQuerier{}, &mockBorderQuerier{})
+	_, err := s.SearchPoint(context.Background(), &regionv1.SearchPointRequest{
+		Location: &geo.Coordinate{Lon: 0, Lat: 91},
+	})
+	if code := status.Code(err); code != codes.InvalidArgument {
+		t.Errorf("code = %v, want %v", code, codes.InvalidArgument)
+	}
+}
+
+func TestSearchPoint_NaNCoordinate(t *testing.T) {
+	s := newTestRegionServer(&mockRegionQuerier{}, &mockBorderQuerier{})
+	_, err := s.SearchPoint(context.Background(), &regionv1.SearchPointRequest{
+		Location: &geo.Coordinate{Lon: math.NaN(), Lat: 0},
+	})
+	if code := status.Code(err); code != codes.InvalidArgument {
+		t.Errorf("code = %v, want %v", code, codes.InvalidArgument)
+	}
+}
+
+func TestSearchRadius_NonPositiveRadius(t *testing.T) {
+	s := newTestRegionServer(&mockRegionQuerier{}, &mockBorderQuerier{})
+	_, err := s.SearchRadius(context.Background(), &regionv1.SearchRadiusRequest{
+		Location: &geo.Coordinate{Lon: 0, Lat: 0},
+		RadiusKm: 0,
+	})
+	if code := status.Code(err); code != codes.InvalidArgument {
+		t.Errorf("code = %v, want %v", code, codes.InvalidArgument)
+	}
+}
+
+func TestSearchBox_InvertedLatitude(t *testing.T) {
+	s := newTestRegionServer(&mockRegionQuerier{}, &mockBorderQuerier{})
+	_, err := s.SearchBox(context.Background(), &regionv1.SearchBoxRequest{
+		Box: &geo.BoundingBox{
+			BottomLeft: &geo.Coordinate{Lon: 0, Lat: 10},
+			TopRight:   &geo.Coordinate{Lon: 10, Lat: 0},
+		},
+	})
+	if code := status.Code(err); code != codes.InvalidArgument {
+		t.Errorf("code = %v, want %v", code, codes.InvalidArgument)
+	}
+}
+
+func TestSearchBox_AntimeridianBoxAllowed(t *testing.T) {
+	rq := &mockRegionQuerier{
+		searchByBoxFn: func(bl, tr orb.Point, ext bool) []*index.RegionResult {
+			return nil
+		},
+	}
+	s := newTestRegionServer(rq, &mockBorderQuerier{})
+	_, err := s.SearchBox(context.Background(), &regionv1.SearchBoxRequest{
+		Box: &geo.BoundingBox{
+			BottomLeft: &geo.Coordinate{Lon: 179, Lat: -10},
+			TopRight:   &geo.Coordinate{Lon: -179, Lat: 10},
+		},
+	})
+	if err != nil {
+		t.Fatalf("antimeridian box should be allowed, got: %v", err)
 	}
 }
 

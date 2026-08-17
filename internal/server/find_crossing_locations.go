@@ -47,17 +47,11 @@ func (s *RegionServer) FindCrossingLocations(
 			codes.InvalidArgument, "to_region must be set",
 		)
 	}
-	if req.FromLocation == nil {
-		lg.Debugln("from_coordinate must be set")
-		return nil, status.Error(
-			codes.InvalidArgument, "from_coordinate must be set",
-		)
+	if err := validateCoordinate(req.FromLocation, "from_location"); err != nil {
+		return nil, err
 	}
-	if req.ToLocation == nil {
-		lg.Debugln("to_coordinate must be set")
-		return nil, status.Error(
-			codes.InvalidArgument, "to_coordinate must be set",
-		)
+	if err := validateCoordinate(req.ToLocation, "to_location"); err != nil {
+		return nil, err
 	}
 
 	if req.ConfigOneof == nil {
@@ -95,8 +89,9 @@ func (s *RegionServer) findCrossingLocationsSimple(
 			regionv1.RoadType_SECONDARY,
 		}
 	}
-	if req.Limit == 0 {
-		req.Limit = 3
+	limit := req.Limit
+	if limit <= 0 {
+		limit = 3
 	}
 	if cfg.RoadTypeDelta <= 0 {
 		cfg.RoadTypeDelta = 10000
@@ -118,7 +113,7 @@ func (s *RegionServer) findCrossingLocationsSimple(
 	res := s.BorderIndex().FindCrossingLocations(
 		ctx,
 		req.FromRegion, req.ToRegion,
-		line, roadTypeOrder, int(req.Limit),
+		line, roadTypeOrder, int(limit),
 		cfg.RoadTypeDelta, cfg.DropDistance)
 	
 	resp := &regionv1.FindCrossingLocationsResponse{
@@ -148,8 +143,9 @@ func (s *RegionServer) findCrossingLocationsAdvanced(
 	req *regionv1.FindCrossingLocationsRequest,
 	cfg *regionv1.BorderCrossingAdvancedConfig,
 ) (*regionv1.FindCrossingLocationsResponse, error) {
-	if req.Limit == 0 {
-		req.Limit = 3
+	limit := req.Limit
+	if limit <= 0 {
+		limit = 3
 	}
 
 	line := orb.LineString{
@@ -184,7 +180,7 @@ func (s *RegionServer) findCrossingLocationsAdvanced(
 	res := s.BorderIndex().FindCrossingLocations(
 		ctx,
 		req.FromRegion, req.ToRegion,
-		line, roadTypeOrder, int(req.Limit),
+		line, roadTypeOrder, int(limit),
 		cfgDef.RoadTypeDelta, cfgDef.DropDistance)
 	
 	resp := &regionv1.FindCrossingLocationsResponse{

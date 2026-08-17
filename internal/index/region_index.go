@@ -68,9 +68,12 @@ func (i RegionIndex) SearchByPoint(
 	p orb.Point,
 	extended bool,
 ) (res []*RegionResult) {
-	box, _ := rtreego.NewRect(
+	box, err := rtreego.NewRect(
 		rtreego.Point{p[0], p[1]},
 		[]float64{pointSize, pointSize})
+	if err != nil {
+		return nil
+	}
 
 	var coreCands, extCands []rtreego.Spatial
 	coreCands = i.coreRtree.SearchIntersect(box)
@@ -183,10 +186,13 @@ func (i RegionIndex) SearchByBox(
 		return res
 	}
 
-	box, _ := rtreego.NewRect(
+	box, err := rtreego.NewRect(
 		rtreego.Point{bottomLeft[0], bottomLeft[1]},
 		[]float64{w, h},
 	)
+	if err != nil {
+		return nil
+	}
 
 	var coreCands, extCands []rtreego.Spatial
 	coreCands = i.coreRtree.SearchIntersect(box)
@@ -365,10 +371,13 @@ func parseFeature(gj *geojson.FeatureCollection) (*GeoShape, error) {
 			continue
 		}
 		bounds := box.Bounds()
-		bbox, _  := rtreego.NewRectFromPoints(
+		bbox, err := rtreego.NewRectFromPoints(
 			rtreego.Point{bounds.Min.X(), bounds.Min.Y()},
 			rtreego.Point{bounds.Max.X(), bounds.Max.Y()},
 		)
+		if err != nil {
+			return nil, err
+		}
 		bboxSet[i] = &bbox
 	}
 

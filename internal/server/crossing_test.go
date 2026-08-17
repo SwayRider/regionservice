@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"math"
 	"testing"
 
 	"github.com/paulmach/orb"
@@ -193,6 +194,94 @@ func TestFindCrossingDefinition(t *testing.T) {
 			got := findCrossingDefinition(tt.refDistance, tt.defs)
 			if got.MaxBorderDistance != tt.wantMax {
 				t.Errorf("MaxBorderDistance = %v, want %v", got.MaxBorderDistance, tt.wantMax)
+			}
+		})
+	}
+}
+
+// =============================================================================
+// Negative limit regression tests (point 2)
+// =============================================================================
+
+func TestFindCrossingLocations_SimpleConfig_NegativeLimitDefaults(t *testing.T) {
+	var gotLimit int
+	bq := &mockBorderQuerier{
+		findCrossingLocationsFn: func(_ context.Context, _, _ string, _ orb.LineString, _ []string, limit int, _, _ float64) []*index.BorderCrossingResult {
+			gotLimit = limit
+			return nil
+		},
+	}
+	s := newTestRegionServer(&mockRegionQuerier{}, bq)
+
+	req := validCrossingReq()
+	req.Limit = -1
+	if _, err := s.FindCrossingLocations(context.Background(), req); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gotLimit != 3 {
+		t.Errorf("limit = %d, want 3", gotLimit)
+	}
+}
+
+func TestFindCrossingLocations_AdvancedConfig_NegativeLimitDefaults(t *testing.T) {
+	var gotLimit int
+	bq := &mockBorderQuerier{
+		findClosestCrossingFn: func(_ context.Context, _, _ string, _ orb.Point, _ []string) *index.ClosestBorderCrossing {
+			return &index.ClosestBorderCrossing{
+				Distance: 100,
+				BorderCrossing: &index.BorderCrossing{
+					FromRegion: "A",
+					ToRegion:   "B",
+					Location:   orb.Point{1, 1},
+				},
+			}
+		},
+		findCrossingLocationsFn: func(_ context.Context, _, _ string, _ orb.LineString, _ []string, limit int, _, _ float64) []*index.BorderCrossingResult {
+			gotLimit = limit
+			return nil
+		},
+	}
+	s := newTestRegionServer(&mockRegionQuerier{}, bq)
+
+	req := validCrossingReq()
+	req.Limit = -1
+	req.ConfigOneof = &regionv1.FindCrossingLocationsRequest_AdvancedConfig{
+		AdvancedConfig: &regionv1.BorderCrossingAdvancedConfig{
+			Definitions: []*regionv1.BorderCrossingDefinition{
+				{MaxBorderDistance: 50, RoadTypeOrder: []regionv1.RoadType{regionv1.RoadType_MOTORWAY}},
+			},
+		},
+	}
+	if _, err := s.FindCrossingLocations(context.Background(), req); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gotLimit != 3 {
+		t.Errorf("limit = %d, want 3", gotLimit)
+	}
+}
+
+// =============================================================================
+// Coordinate validation tests (point 3)
+// =============================================================================
+
+func TestFindCrossingLocations_InvalidCoordinates(t *testing.T) {
+	s := newTestRegionServer(&mockRegionQuerier{}, &mockBorderQuerier{})
+
+	tests := []struct {
+		name   string
+		mutate func(*regionv1.FindCrossingLocationsRequest)
+	}{
+		{"out-of-range latitude", func(r *regionv1.FindCrossingLocationsRequest) { r.FromLocation.Lat = 91 }},
+		{"NaN longitude", func(r *regionv1.FindCrossingLocationsRequest) { r.ToLocation.Lon = math.NaN() }},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := validCrossingReq()
+			tt.mutate(req)
+			_, err := s.FindCrossingLocations(context.Background(), req)
+			if code := status.Code(err); code != codes.InvalidArgument {
+				t.Errorf("code = %v, want %v", code, codes.InvalidArgument)
 			}
 		})
 	}

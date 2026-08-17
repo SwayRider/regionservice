@@ -123,7 +123,15 @@ func (i *BorderIndex) FindCrossingLocations(
 		return cands[i].DistanceSquared < cands[j].DistanceSquared
 	})
 
-	list := make([]*BorderCrossingResult, 0, limit)
+	// A negative limit must never reach make's capacity argument (it would
+	// panic with "makeslice: cap out of range"). Clamp it defensively; the
+	// handler layer already defaults non-positive limits, so this only guards
+	// against direct callers.
+	capacity := limit
+	if capacity < 0 {
+		capacity = 0
+	}
+	list := make([]*BorderCrossingResult, 0, capacity)
 	cnt := 0
 	var lastPoint orb.Point
 	for _, cand := range cands {

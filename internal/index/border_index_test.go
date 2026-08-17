@@ -208,6 +208,22 @@ func TestFindCrossingLocations_RoadTypeFilter(t *testing.T) {
 	}
 }
 
+func TestFindCrossingLocations_NegativeLimitDoesNotPanic(t *testing.T) {
+	idx := newTestBorderIndex(types.BorderCrossingCollection{
+		{FromRegion: "A", ToRegion: "B", RoadType: types.PRIMARY, Lon: 0, Lat: 0},
+		{FromRegion: "A", ToRegion: "B", RoadType: types.PRIMARY, Lon: 1, Lat: 0},
+	})
+
+	line := orb.LineString{orb.Point{0, 0}, orb.Point{1, 0}}
+	res := idx.FindCrossingLocations(
+		context.Background(), "A", "B",
+		line, []string{"PRIMARY"}, -1, 100000, 1,
+	)
+	if len(res) != 2 {
+		t.Errorf("expected 2 results (negative limit must not panic), got %d", len(res))
+	}
+}
+
 func TestFindCrossingLocations_DropDistance(t *testing.T) {
 	// Two crossings at the same spot; dropDistance larger than distance between them
 	idx := newTestBorderIndex(types.BorderCrossingCollection{
