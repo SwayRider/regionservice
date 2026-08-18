@@ -33,7 +33,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"github.com/swayrider/grpcclients"
@@ -45,7 +44,7 @@ import (
 	"github.com/swayrider/regionservice/internal/index"
 	"github.com/swayrider/regionservice/internal/server"
 	"github.com/swayrider/swlib/app"
-	"github.com/swayrider/swlib/cache"
+	"github.com/swayrider/swlib/jwtkeys"
 	log "github.com/swayrider/swlib/logger"
 	"google.golang.org/grpc"
 )
@@ -54,13 +53,9 @@ import (
 const (
 	FldGeoDataDir = "geodata-dir" // CLI flag name for geodata root directory
 	EnvGeoDataDir = "GEODATA_DIR" // Environment variable name for geodata root directory
-
-	jwtPublicKeys cache.LocalCacheKey = "jwt_public_keys"
 )
 
 func main() {
-	keyChan := make(chan []string)
-
 	ri := index.NewRegionIndex()
 	bi := index.NewBorderIndex()
 
@@ -73,18 +68,20 @@ func main() {
 			app.NewStringConfigField(FldGeoDataDir, EnvGeoDataDir, "Root directory containing geodata", ""),
 		).
 		WithConfigFields(app.RateLimitConfigFields()...).
+		WithConfigFields(app.JWTKeysConfigFields()...).
 		WithAppData("RegionIndex", ri).
 		WithAppData("BorderIndex", bi)
 
-	grpcConfig := newGrpcConfig(application)
+	jwtKeyCache := jwtkeys.New(application.Logger())
+
+	grpcConfig := newGrpcConfig(application, jwtKeyCache)
 
 	application = application.
 		WithBackgroundRoutines(
-			publicKeyListener(keyChan),
-			publicKeyFetcher(keyChan),
+			app.JWTKeysFetcher(jwtKeyCache),
 			app.RateLimitEvictor(grpcConfig),
 		).
-		WithInitializers(bootstrapFn, app.RateLimiterInitializer(grpcConfig)).
+		WithInitializers(bootstrapFn, app.JWTKeysInitializer(jwtKeyCache), app.RateLimiterInitializer(grpcConfig)).
 		WithGrpc(grpcConfig)
 	application.Run()
 }
@@ -93,10 +90,10 @@ func main() {
 // Every RegionService endpoint (declared in internal/server/server.go) requires
 // a valid user JWT or a service client token with the "region:query" scope;
 // only the health Ping endpoint is public.
-func newGrpcConfig(application app.App) *app.GrpcConfig {
+func newGrpcConfig(application app.App, jwtKeyCache *jwtkeys.Cache) *app.GrpcConfig {
 	return app.NewGrpcConfig(
 		app.AuthInterceptor|app.RateLimitInterceptor,
-		getPublicKeys,
+		jwtKeyCache.GetPublicKeys,
 		app.GrpcServiceHooks{
 			ServiceRegistrar:   grpcRegionRegistrar,
 			ServiceHTTPHandler: grpcRegionGateway(application),
@@ -118,48 +115,6 @@ func authServiceClientCtor(a app.App) grpcclients.Client {
 		lg.Fatalf("failed to create authservice client: %v", err)
 	}
 	return clnt
-}
-
-// publicKeyListener is a background routine that listens for JWT public key
-// updates and stores them in the local cache.
-func publicKeyListener(keyChan chan []string) func(app.App) {
-	return func(a app.App) {
-		ctx := a.BackgroundContext()
-		defer a.BackgroundWaitGroup().Done()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case keys := <-keyChan:
-				cache.LCSet(jwtPublicKeys, keys)
-			}
-		}
-	}
-}
-
-// publicKeyFetcher is a background routine that periodically fetches JWT public
-// keys from the authservice and sends them to the listener via the channel.
-func publicKeyFetcher(keyChan chan []string) func(app.App) {
-	return func(a app.App) {
-		ctx := a.BackgroundContext()
-		defer a.BackgroundWaitGroup().Done()
-		clnt := app.GetServiceClient[*authclient.Client](a, "authservice")
-		authclient.PublicKeyFetcher(ctx, clnt, keyChan)
-	}
-}
-
-// getPublicKeys retrieves JWT public keys from the local cache.
-// This function is called by the gRPC auth interceptor to verify tokens.
-func getPublicKeys() ([]string, error) {
-	keysIface, ok := cache.LCGet(jwtPublicKeys)
-	if !ok {
-		return nil, fmt.Errorf("no public keys found")
-	}
-	keys, ok := keysIface.([]string)
-	if !ok {
-		return nil, fmt.Errorf("invalid public keys")
-	}
-	return keys, nil
 }
 
 // bootstrapFn loads geodata from the filesystem and builds the spatial indices.

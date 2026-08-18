@@ -4,13 +4,15 @@ import (
 	"testing"
 
 	"github.com/swayrider/swlib/app"
+	"github.com/swayrider/swlib/jwtkeys"
+	log "github.com/swayrider/swlib/logger"
 )
 
 // TestNewGrpcConfigEnablesAuth guards against the regression where the gRPC
 // server was built with app.NoInterceptor, leaving every RegionService
 // endpoint public despite the auth declarations in internal/server/server.go.
 func TestNewGrpcConfigEnablesAuth(t *testing.T) {
-	cfg := newGrpcConfig(app.New("regionservice"))
+	cfg := newGrpcConfig(app.New("regionservice"), jwtkeys.New(log.New()))
 
 	if cfg.Interceptors&app.AuthInterceptor == 0 {
 		t.Error("expected AuthInterceptor to be enabled in the gRPC config")
