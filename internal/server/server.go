@@ -18,11 +18,11 @@ import (
 	"context"
 
 	"github.com/paulmach/orb"
-	regionv1 "github.com/swayrider/protos/region/v1"
 	healthv1 "github.com/swayrider/protos/health/v1"
+	regionv1 "github.com/swayrider/protos/region/v1"
+	"github.com/swayrider/regionservice/internal/index"
 	log "github.com/swayrider/swlib/logger"
 	"github.com/swayrider/swlib/security"
-	"github.com/swayrider/regionservice/internal/index"
 )
 
 // RegionQuerier abstracts spatial region lookups.
@@ -39,7 +39,7 @@ type BorderQuerier interface {
 	FindCrossingLocations(ctx context.Context, fromRegion, toRegion string, line orb.LineString, roadOrder []string, limit int, roadTypeDelta, dropDistance float64) []*index.BorderCrossingResult
 	FindClosestCrossing(ctx context.Context, fromRegion, toRegion string, location orb.Point, validRoadTypes []string) *index.ClosestBorderCrossing
 	FindRegionPath(ctx context.Context, fromRegion, toRegion string) []string
-	FindRouteRegionPaths(ctx context.Context, fromRegion, toRegion string, allowedRegions map[string]bool) [][]string
+	FindRouteRegionPaths(ctx context.Context, fromRegion, toRegion string, allowedRegions map[string]bool) ([][]string, error)
 }
 
 // init registers endpoint authorization. All RegionService endpoints require a

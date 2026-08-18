@@ -314,32 +314,50 @@ func (i *BorderIndex) FindRegionPath(
 	return nil
 }
 
-const maxPathLengthMultiplier = 2
+const (
+	maxPathLengthMultiplier = 2
+	maxRouteRegionPaths     = 100     // Cap on the number of returned paths.
+	maxRouteRegionPathSteps = 100_000 // Work budget: max DFS iterations.
+)
 
-// FindRouteRegionPaths finds all acyclic paths from fromRegion to toRegion
-// that are constrained to the provided set of allowed regions.
-// Uses iterative DFS; path length is bounded at maxPathLengthMultiplier times
-// the shortest allowed BFS path to prevent exponential exploration.
-// Returns nil if no path exists within the allowed set.
+// FindRouteRegionPaths finds acyclic paths from fromRegion to toRegion that
+// are constrained to the provided set of allowed regions. It uses an iterative
+// DFS whose path length is bounded at maxPathLengthMultiplier times the
+// shortest allowed BFS path. Both the number of returned paths and the number
+// of DFS iterations are capped, and the context is honored, so the search is
+// bounded even on highly-connected region graphs. Neighbors are visited in
+// lexicographic order so the result is deterministic.
+//
+// Returns nil, nil if no path exists within the allowed set.
 func (i *BorderIndex) FindRouteRegionPaths(
 	ctx context.Context,
 	fromRegion, toRegion string,
 	allowedRegions map[string]bool,
-) [][]string {
+) ([][]string, error) {
 	if !allowedRegions[fromRegion] || !allowedRegions[toRegion] {
-		return nil
+		return nil, nil
 	}
 
-	shortest := i.findShortestAllowedPath(fromRegion, toRegion, allowedRegions)
+	shortest, err := i.findShortestAllowedPath(ctx, fromRegion, toRegion, allowedRegions)
+	if err != nil {
+		return nil, err
+	}
 	if shortest == nil {
-		return nil
+		return nil, nil
 	}
 	maxLen := len(shortest) * maxPathLengthMultiplier
 
 	var results [][]string
 	stack := [][]string{{fromRegion}}
 
-	for len(stack) > 0 {
+	for steps := 0; len(stack) > 0; steps++ {
+		if steps >= maxRouteRegionPathSteps {
+			break
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+
 		path := stack[len(stack)-1]
 		stack = stack[:len(stack)-1]
 
@@ -347,6 +365,9 @@ func (i *BorderIndex) FindRouteRegionPaths(
 
 		if last == toRegion {
 			results = append(results, path)
+			if len(results) >= maxRouteRegionPaths {
+				break
+			}
 			continue
 		}
 
@@ -354,10 +375,9 @@ func (i *BorderIndex) FindRouteRegionPaths(
 			continue
 		}
 
-		for neighbor := range i.regionCrossings[last] {
-			if !allowedRegions[neighbor] {
-				continue
-			}
+		neighbors := sortedNeighbors(i.regionCrossings[last], allowedRegions)
+		for j := len(neighbors) - 1; j >= 0; j-- {
+			neighbor := neighbors[j]
 			if regionInPath(path, neighbor) {
 				continue
 			}
@@ -368,36 +388,39 @@ func (i *BorderIndex) FindRouteRegionPaths(
 		}
 	}
 
-	return results
+	return results, nil
 }
 
 // findShortestAllowedPath is a BFS that finds the shortest path from fromRegion
-// to toRegion considering only regions in allowed.
+// to toRegion considering only regions in allowed. Neighbors are visited in
+// lexicographic order so the returned path is deterministic. Honors ctx.
 func (i *BorderIndex) findShortestAllowedPath(
+	ctx context.Context,
 	fromRegion, toRegion string,
 	allowed map[string]bool,
-) []string {
+) ([]string, error) {
 	toMap, ok := i.regionCrossings[fromRegion]
 	if !ok {
-		return nil
+		return nil, nil
 	}
 
 	passed := make(map[string]struct{})
 	endpoints := make(map[string][]string)
 
-	for neighbor := range toMap {
-		if !allowed[neighbor] {
-			continue
-		}
+	for _, neighbor := range sortedNeighbors(toMap, allowed) {
 		endpoints[neighbor] = []string{fromRegion, neighbor}
 		passed[neighbor] = struct{}{}
 	}
 
 	if path, ok := endpoints[toRegion]; ok {
-		return path
+		return path, nil
 	}
 
 	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+
 		numAdded := 0
 		newEndpoints := make(map[string][]string)
 
@@ -406,11 +429,8 @@ func (i *BorderIndex) findShortestAllowedPath(
 			if !ok {
 				continue
 			}
-			for neighbor := range toMap {
+			for _, neighbor := range sortedNeighbors(toMap, allowed) {
 				if _, seen := passed[neighbor]; seen {
-					continue
-				}
-				if !allowed[neighbor] {
 					continue
 				}
 				newEndpoints[neighbor] = append([]string{}, list...)
@@ -427,9 +447,22 @@ func (i *BorderIndex) findShortestAllowedPath(
 	}
 
 	if path, ok := endpoints[toRegion]; ok {
-		return path
+		return path, nil
 	}
-	return nil
+	return nil, nil
+}
+
+// sortedNeighbors returns the allowed neighbors of a region in lexicographic
+// order, for deterministic graph traversal.
+func sortedNeighbors(neighbors map[string][]*BorderCrossing, allowed map[string]bool) []string {
+	result := make([]string, 0, len(neighbors))
+	for region := range neighbors {
+		if allowed[region] {
+			result = append(result, region)
+		}
+	}
+	sort.Strings(result)
+	return result
 }
 
 // regionInPath reports whether region already appears in path.

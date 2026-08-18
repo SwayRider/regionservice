@@ -77,7 +77,10 @@ func (s *RegionServer) FindRouteRegionPaths(
 	fromRegion := startRes[0].Region.Name()
 	toRegion := endRes[0].Region.Name()
 
-	rawPaths := s.BorderIndex().FindRouteRegionPaths(ctx, fromRegion, toRegion, allowedRegions)
+	rawPaths, err := s.BorderIndex().FindRouteRegionPaths(ctx, fromRegion, toRegion, allowedRegions)
+	if err != nil {
+		return nil, err
+	}
 	if len(rawPaths) == 0 {
 		lg.Infoln("No route region paths found")
 		return &regionv1.FindRouteRegionPathsResponse{}, nil

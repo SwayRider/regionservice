@@ -5,9 +5,9 @@ import (
 	"testing"
 
 	"github.com/paulmach/orb"
-	"github.com/swayrider/regionservice/internal/index"
-	regionv1 "github.com/swayrider/protos/region/v1"
 	"github.com/swayrider/protos/common_types/geo"
+	regionv1 "github.com/swayrider/protos/region/v1"
+	"github.com/swayrider/regionservice/internal/index"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -171,8 +171,8 @@ func TestFindRouteRegionPaths_Success(t *testing.T) {
 		},
 	}
 	bq := &mockBorderQuerier{
-		findRouteRegionPathsFn: func(_ context.Context, from, to string, allowed map[string]bool) [][]string {
-			return [][]string{{"A", "B", "C"}}
+		findRouteRegionPathsFn: func(_ context.Context, from, to string, allowed map[string]bool) ([][]string, error) {
+			return [][]string{{"A", "B", "C"}}, nil
 		},
 	}
 	s := newTestRegionServer(rq, bq)

@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	"github.com/paulmach/orb"
-	log "github.com/swayrider/swlib/logger"
 	"github.com/swayrider/regionservice/internal/index"
+	log "github.com/swayrider/swlib/logger"
 )
 
 func TestMain(m *testing.M) {
@@ -63,7 +63,7 @@ type mockBorderQuerier struct {
 	findCrossingLocationsFn func(ctx context.Context, fromRegion, toRegion string, line orb.LineString, roadOrder []string, limit int, roadTypeDelta, dropDistance float64) []*index.BorderCrossingResult
 	findClosestCrossingFn   func(ctx context.Context, fromRegion, toRegion string, location orb.Point, validRoadTypes []string) *index.ClosestBorderCrossing
 	findRegionPathFn        func(ctx context.Context, fromRegion, toRegion string) []string
-	findRouteRegionPathsFn  func(ctx context.Context, fromRegion, toRegion string, allowedRegions map[string]bool) [][]string
+	findRouteRegionPathsFn  func(ctx context.Context, fromRegion, toRegion string, allowedRegions map[string]bool) ([][]string, error)
 }
 
 func (m *mockBorderQuerier) FindCrossingLocations(ctx context.Context, fromRegion, toRegion string, line orb.LineString, roadOrder []string, limit int, roadTypeDelta, dropDistance float64) []*index.BorderCrossingResult {
@@ -87,9 +87,9 @@ func (m *mockBorderQuerier) FindRegionPath(ctx context.Context, fromRegion, toRe
 	return nil
 }
 
-func (m *mockBorderQuerier) FindRouteRegionPaths(ctx context.Context, fromRegion, toRegion string, allowedRegions map[string]bool) [][]string {
+func (m *mockBorderQuerier) FindRouteRegionPaths(ctx context.Context, fromRegion, toRegion string, allowedRegions map[string]bool) ([][]string, error) {
 	if m.findRouteRegionPathsFn != nil {
 		return m.findRouteRegionPathsFn(ctx, fromRegion, toRegion, allowedRegions)
 	}
-	return nil
+	return nil, nil
 }

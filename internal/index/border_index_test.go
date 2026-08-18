@@ -2,6 +2,7 @@ package index
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/paulmach/orb"
@@ -103,7 +104,10 @@ func TestFindRouteRegionPaths_SinglePath(t *testing.T) {
 	})
 	allowed := map[string]bool{"A": true, "B": true, "C": true}
 
-	paths := idx.FindRouteRegionPaths(context.Background(), "A", "C", allowed)
+	paths, err := idx.FindRouteRegionPaths(context.Background(), "A", "C", allowed)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if len(paths) != 1 {
 		t.Fatalf("expected 1 path, got %d: %v", len(paths), paths)
 	}
@@ -122,7 +126,10 @@ func TestFindRouteRegionPaths_MultiplePaths(t *testing.T) {
 	})
 	allowed := map[string]bool{"A": true, "B": true, "C": true, "D": true}
 
-	paths := idx.FindRouteRegionPaths(context.Background(), "A", "D", allowed)
+	paths, err := idx.FindRouteRegionPaths(context.Background(), "A", "D", allowed)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if len(paths) != 2 {
 		t.Errorf("expected 2 paths, got %d: %v", len(paths), paths)
 	}
@@ -134,7 +141,10 @@ func TestFindRouteRegionPaths_FromNotAllowed(t *testing.T) {
 	})
 	allowed := map[string]bool{"B": true} // A not included
 
-	paths := idx.FindRouteRegionPaths(context.Background(), "A", "B", allowed)
+	paths, err := idx.FindRouteRegionPaths(context.Background(), "A", "B", allowed)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if paths != nil {
 		t.Errorf("expected nil when fromRegion not allowed, got %v", paths)
 	}
@@ -148,10 +158,119 @@ func TestFindRouteRegionPaths_NoPathWithinAllowed(t *testing.T) {
 	})
 	allowed := map[string]bool{"A": true, "C": true} // B excluded
 
-	paths := idx.FindRouteRegionPaths(context.Background(), "A", "C", allowed)
+	paths, err := idx.FindRouteRegionPaths(context.Background(), "A", "C", allowed)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if paths != nil {
 		t.Errorf("expected nil when path goes through disallowed region, got %v", paths)
 	}
+}
+
+func TestFindRouteRegionPaths_PreservesLongerPaths(t *testing.T) {
+	// Shortest is A→D, but the corridor may favor the longer A→B→C→D detour;
+	// both must be returned (within 2× shortest).
+	idx := newTestBorderIndex(types.BorderCrossingCollection{
+		{FromRegion: "A", ToRegion: "D", RoadType: types.PRIMARY, Lon: 1, Lat: 1},
+		{FromRegion: "A", ToRegion: "B", RoadType: types.PRIMARY, Lon: 1, Lat: 1},
+		{FromRegion: "B", ToRegion: "C", RoadType: types.PRIMARY, Lon: 2, Lat: 2},
+		{FromRegion: "C", ToRegion: "D", RoadType: types.PRIMARY, Lon: 3, Lat: 3},
+	})
+	allowed := map[string]bool{"A": true, "B": true, "C": true, "D": true}
+
+	paths, err := idx.FindRouteRegionPaths(context.Background(), "A", "D", allowed)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !containsPath(paths, []string{"A", "D"}) {
+		t.Errorf("shortest path [A D] missing from %v", paths)
+	}
+	if !containsPath(paths, []string{"A", "B", "C", "D"}) {
+		t.Errorf("longer path [A B C D] missing from %v", paths)
+	}
+}
+
+func TestFindRouteRegionPaths_Cap(t *testing.T) {
+	// 150 distinct shortest paths A→Xi→D; the result must be capped.
+	crossings := make(types.BorderCrossingCollection, 0, 300)
+	allowed := map[string]bool{"A": true, "D": true}
+	for i := 0; i < 150; i++ {
+		name := fmt.Sprintf("X%03d", i)
+		allowed[name] = true
+		crossings = append(crossings,
+			types.BorderCrossing{FromRegion: "A", ToRegion: name, RoadType: types.PRIMARY, Lon: 1, Lat: 1},
+			types.BorderCrossing{FromRegion: name, ToRegion: "D", RoadType: types.PRIMARY, Lon: 2, Lat: 2},
+		)
+	}
+	idx := newTestBorderIndex(crossings)
+
+	paths, err := idx.FindRouteRegionPaths(context.Background(), "A", "D", allowed)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(paths) != maxRouteRegionPaths {
+		t.Errorf("got %d paths, want capped at %d", len(paths), maxRouteRegionPaths)
+	}
+}
+
+func TestFindRouteRegionPaths_ContextCancelled(t *testing.T) {
+	idx := newTestBorderIndex(types.BorderCrossingCollection{
+		{FromRegion: "A", ToRegion: "B", RoadType: types.PRIMARY, Lon: 1, Lat: 1},
+		{FromRegion: "B", ToRegion: "C", RoadType: types.PRIMARY, Lon: 2, Lat: 2},
+	})
+	allowed := map[string]bool{"A": true, "B": true, "C": true}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	paths, err := idx.FindRouteRegionPaths(ctx, "A", "C", allowed)
+	if err != context.Canceled {
+		t.Errorf("err = %v, want %v", err, context.Canceled)
+	}
+	if paths != nil {
+		t.Errorf("paths = %v, want nil", paths)
+	}
+}
+
+func TestFindRouteRegionPaths_DeterministicOrder(t *testing.T) {
+	// A→B→D and A→C→D both valid; lexicographic neighbor order must yield
+	// [A B D] before [A C D] deterministically.
+	idx := newTestBorderIndex(types.BorderCrossingCollection{
+		{FromRegion: "A", ToRegion: "B", RoadType: types.PRIMARY, Lon: 1, Lat: 1},
+		{FromRegion: "A", ToRegion: "C", RoadType: types.PRIMARY, Lon: 1, Lat: 2},
+		{FromRegion: "B", ToRegion: "D", RoadType: types.PRIMARY, Lon: 2, Lat: 1},
+		{FromRegion: "C", ToRegion: "D", RoadType: types.PRIMARY, Lon: 2, Lat: 2},
+	})
+	allowed := map[string]bool{"A": true, "B": true, "C": true, "D": true}
+
+	paths, err := idx.FindRouteRegionPaths(context.Background(), "A", "D", allowed)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(paths) != 2 || !equalPath(paths[0], []string{"A", "B", "D"}) || !equalPath(paths[1], []string{"A", "C", "D"}) {
+		t.Errorf("paths = %v, want [[A B D] [A C D]]", paths)
+	}
+}
+
+func containsPath(paths [][]string, want []string) bool {
+	for _, p := range paths {
+		if equalPath(p, want) {
+			return true
+		}
+	}
+	return false
+}
+
+func equalPath(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // =============================================================================
