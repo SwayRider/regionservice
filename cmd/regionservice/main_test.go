@@ -18,4 +18,7 @@ func TestNewGrpcConfigEnablesAuth(t *testing.T) {
 	if cfg.JWTPublicKeysFn == nil {
 		t.Error("expected a non-nil JWTPublicKeysFn when AuthInterceptor is enabled")
 	}
+	if cfg.Interceptors&app.RateLimitInterceptor == 0 {
+		t.Error("expected RateLimitInterceptor to be enabled in the gRPC config")
+	}
 }

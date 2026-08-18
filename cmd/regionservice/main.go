@@ -72,15 +72,20 @@ func main() {
 		WithConfigFields(
 			app.NewStringConfigField(FldGeoDataDir, EnvGeoDataDir, "Root directory containing geodata", ""),
 		).
+		WithConfigFields(app.RateLimitConfigFields()...).
 		WithAppData("RegionIndex", ri).
-		WithAppData("BorderIndex", bi).
+		WithAppData("BorderIndex", bi)
+
+	grpcConfig := newGrpcConfig(application)
+
+	application = application.
 		WithBackgroundRoutines(
 			publicKeyListener(keyChan),
 			publicKeyFetcher(keyChan),
+			app.RateLimitEvictor(grpcConfig),
 		).
-		WithInitializers(bootstrapFn)
-
-	application = application.WithGrpc(newGrpcConfig(application))
+		WithInitializers(bootstrapFn, app.RateLimiterInitializer(grpcConfig)).
+		WithGrpc(grpcConfig)
 	application.Run()
 }
 
@@ -90,7 +95,7 @@ func main() {
 // only the health Ping endpoint is public.
 func newGrpcConfig(application app.App) *app.GrpcConfig {
 	return app.NewGrpcConfig(
-		app.AuthInterceptor,
+		app.AuthInterceptor|app.RateLimitInterceptor,
 		getPublicKeys,
 		app.GrpcServiceHooks{
 			ServiceRegistrar:   grpcRegionRegistrar,
