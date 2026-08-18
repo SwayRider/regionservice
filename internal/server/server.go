@@ -53,6 +53,7 @@ func init() {
 	security.UserOrServiceEndpoint("/region.v1.RegionService/FindRouteRegionPaths", []string{"region:query"})
 
 	security.PublicEndpoint("/health.v1.HealthService/Ping")
+	security.PublicEndpoint("/health.v1.HealthService/Check")
 }
 
 // RegionServer implements the RegionService gRPC interface.

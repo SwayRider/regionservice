@@ -32,6 +32,7 @@ The service maintains two in-memory spatial indexes:
 | gRPC endpoint | Access |
 |---|---|
 | `/health.v1.HealthService/Ping` | Public — no token required |
+| `/health.v1.HealthService/Check` | Public — no token required |
 | `/region.v1.RegionService/SearchPoint` | User JWT **or** service client token with `region:query` scope |
 | `/region.v1.RegionService/SearchBox` | User JWT **or** service client token with `region:query` scope |
 | `/region.v1.RegionService/SearchRadius` | User JWT **or** service client token with `region:query` scope |
