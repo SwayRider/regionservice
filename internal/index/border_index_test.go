@@ -53,7 +53,10 @@ func TestFindRegionPath_DirectNeighbour(t *testing.T) {
 		{FromRegion: "A", ToRegion: "B", RoadType: types.PRIMARY, Lon: 1, Lat: 1},
 	})
 
-	path := idx.FindRegionPath(context.Background(), "A", "B")
+	path, err := idx.FindRegionPath(context.Background(), "A", "B")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if len(path) != 2 || path[0] != "A" || path[1] != "B" {
 		t.Errorf("expected [A B], got %v", path)
 	}
@@ -65,7 +68,10 @@ func TestFindRegionPath_TwoHop(t *testing.T) {
 		{FromRegion: "B", ToRegion: "C", RoadType: types.PRIMARY, Lon: 2, Lat: 2},
 	})
 
-	path := idx.FindRegionPath(context.Background(), "A", "C")
+	path, err := idx.FindRegionPath(context.Background(), "A", "C")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if len(path) != 3 || path[0] != "A" || path[1] != "B" || path[2] != "C" {
 		t.Errorf("expected [A B C], got %v", path)
 	}
@@ -76,7 +82,10 @@ func TestFindRegionPath_NoPath(t *testing.T) {
 		{FromRegion: "A", ToRegion: "B", RoadType: types.PRIMARY, Lon: 1, Lat: 1},
 	})
 
-	path := idx.FindRegionPath(context.Background(), "A", "C")
+	path, err := idx.FindRegionPath(context.Background(), "A", "C")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if path != nil {
 		t.Errorf("expected nil, got %v", path)
 	}
@@ -87,7 +96,10 @@ func TestFindRegionPath_UnknownFrom(t *testing.T) {
 		{FromRegion: "A", ToRegion: "B", RoadType: types.PRIMARY, Lon: 1, Lat: 1},
 	})
 
-	path := idx.FindRegionPath(context.Background(), "X", "B")
+	path, err := idx.FindRegionPath(context.Background(), "X", "B")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if path != nil {
 		t.Errorf("expected nil for unknown from-region, got %v", path)
 	}
@@ -283,10 +295,13 @@ func TestFindCrossingLocations_NoCrossings(t *testing.T) {
 	})
 
 	line := orb.LineString{orb.Point{0, 0}, orb.Point{10, 10}}
-	res := idx.FindCrossingLocations(
+	res, err := idx.FindCrossingLocations(
 		context.Background(), "X", "Y",
 		line, []string{"MOTORWAY", "PRIMARY"}, 3, 10000, 1000,
 	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if res != nil {
 		t.Errorf("expected nil for unknown region pair, got %v", res)
 	}
@@ -302,10 +317,13 @@ func TestFindCrossingLocations_Limit(t *testing.T) {
 	})
 
 	line := orb.LineString{orb.Point{0, 0}, orb.Point{3, 0}}
-	res := idx.FindCrossingLocations(
+	res, err := idx.FindCrossingLocations(
 		context.Background(), "A", "B",
 		line, []string{"PRIMARY"}, 2, 100000, 1,
 	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if len(res) > 2 {
 		t.Errorf("expected at most 2 results, got %d", len(res))
 	}
@@ -318,10 +336,13 @@ func TestFindCrossingLocations_RoadTypeFilter(t *testing.T) {
 	})
 
 	line := orb.LineString{orb.Point{0, 0}, orb.Point{10, 10}}
-	res := idx.FindCrossingLocations(
+	res, err := idx.FindCrossingLocations(
 		context.Background(), "A", "B",
 		line, []string{"MOTORWAY"}, 3, 10000, 1000,
 	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if len(res) != 0 {
 		t.Errorf("expected 0 results when road type not in filter, got %d", len(res))
 	}
@@ -334,10 +355,13 @@ func TestFindCrossingLocations_NegativeLimitDoesNotPanic(t *testing.T) {
 	})
 
 	line := orb.LineString{orb.Point{0, 0}, orb.Point{1, 0}}
-	res := idx.FindCrossingLocations(
+	res, err := idx.FindCrossingLocations(
 		context.Background(), "A", "B",
 		line, []string{"PRIMARY"}, -1, 100000, 1,
 	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if len(res) != 2 {
 		t.Errorf("expected 2 results (negative limit must not panic), got %d", len(res))
 	}
@@ -351,10 +375,13 @@ func TestFindCrossingLocations_DropDistance(t *testing.T) {
 	})
 
 	line := orb.LineString{orb.Point{0, 0}, orb.Point{10, 10}}
-	res := idx.FindCrossingLocations(
+	res, err := idx.FindCrossingLocations(
 		context.Background(), "A", "B",
 		line, []string{"PRIMARY"}, 3, 100000, 1000000, // very large dropDistance
 	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if len(res) != 1 {
 		t.Errorf("expected 1 result after dropDistance dedup, got %d", len(res))
 	}
@@ -370,10 +397,13 @@ func TestFindClosestCrossing_ReturnsClosest(t *testing.T) {
 		{FromRegion: "A", ToRegion: "B", RoadType: types.PRIMARY, Lon: 10, Lat: 10, OsmId: 2},
 	})
 
-	res := idx.FindClosestCrossing(
+	res, err := idx.FindClosestCrossing(
 		context.Background(), "A", "B",
 		orb.Point{1.1, 1.1}, nil,
 	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if res == nil {
 		t.Fatal("expected a result, got nil")
 	}
@@ -385,10 +415,13 @@ func TestFindClosestCrossing_ReturnsClosest(t *testing.T) {
 func TestFindClosestCrossing_NoCrossings(t *testing.T) {
 	idx := NewBorderIndex()
 
-	res := idx.FindClosestCrossing(
+	res, err := idx.FindClosestCrossing(
 		context.Background(), "A", "B",
 		orb.Point{5, 5}, nil,
 	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if res != nil {
 		t.Errorf("expected nil for empty index, got %v", res)
 	}
@@ -401,10 +434,13 @@ func TestFindClosestCrossing_RoadTypeFilter(t *testing.T) {
 	})
 
 	// Filter to MOTORWAY only — should return the farther crossing
-	res := idx.FindClosestCrossing(
+	res, err := idx.FindClosestCrossing(
 		context.Background(), "A", "B",
 		orb.Point{1, 1}, []string{"MOTORWAY"},
 	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if res == nil {
 		t.Fatal("expected a result, got nil")
 	}
@@ -438,10 +474,13 @@ func TestFindCrossingLocations_SameRoadTypeSortedByDistance(t *testing.T) {
 		{FromRegion: "A", ToRegion: "B", RoadType: types.PRIMARY, Lon: 5, Lat: 0.001, OsmId: 1},
 	})
 	line := orb.LineString{orb.Point{0, 0}, orb.Point{10, 0}}
-	res := idx.FindCrossingLocations(
+	res, err := idx.FindCrossingLocations(
 		context.Background(), "A", "B",
 		line, []string{"PRIMARY"}, 10, 1000, 1,
 	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	assertOsmIds(t, res, []int{1, 2})
 }
 
@@ -453,10 +492,13 @@ func TestFindCrossingLocations_RoadTypePrecedenceWithinDelta(t *testing.T) {
 		{FromRegion: "A", ToRegion: "B", RoadType: types.MOTORWAY, Lon: 5, Lat: 0.0015, OsmId: 1},
 	})
 	line := orb.LineString{orb.Point{0, 0}, orb.Point{10, 0}}
-	res := idx.FindCrossingLocations(
+	res, err := idx.FindCrossingLocations(
 		context.Background(), "A", "B",
 		line, []string{"MOTORWAY", "SECONDARY"}, 10, 1000, 1,
 	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	assertOsmIds(t, res, []int{1, 2})
 }
 
@@ -468,10 +510,13 @@ func TestFindCrossingLocations_DistanceBeatsRoadTypeBeyondDelta(t *testing.T) {
 		{FromRegion: "A", ToRegion: "B", RoadType: types.SECONDARY, Lon: 5, Lat: 0.0001, OsmId: 2},
 	})
 	line := orb.LineString{orb.Point{0, 0}, orb.Point{10, 0}}
-	res := idx.FindCrossingLocations(
+	res, err := idx.FindCrossingLocations(
 		context.Background(), "A", "B",
 		line, []string{"MOTORWAY", "SECONDARY"}, 10, 100, 1,
 	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	assertOsmIds(t, res, []int{2, 1})
 }
 
@@ -494,8 +539,11 @@ func TestFindCrossingLocations_DeterministicOrdering(t *testing.T) {
 	want := []int{1, 2, 3}
 
 	forward := newTestBorderIndex(crossings)
-	res := forward.FindCrossingLocations(
+	res, err := forward.FindCrossingLocations(
 		context.Background(), "A", "B", line, roadOrder, 10, 2000, 1)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	assertOsmIds(t, res, want)
 
 	reversed := make(types.BorderCrossingCollection, len(crossings))
@@ -503,7 +551,68 @@ func TestFindCrossingLocations_DeterministicOrdering(t *testing.T) {
 		reversed[len(crossings)-1-i] = crossings[i]
 	}
 	backward := newTestBorderIndex(reversed)
-	res = backward.FindCrossingLocations(
+	res, err = backward.FindCrossingLocations(
 		context.Background(), "A", "B", line, roadOrder, 10, 2000, 1)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	assertOsmIds(t, res, want)
+}
+
+// =============================================================================
+// Context cancellation tests (point 10)
+// =============================================================================
+
+func TestFindCrossingLocations_ContextCancelled(t *testing.T) {
+	idx := newTestBorderIndex(types.BorderCrossingCollection{
+		{FromRegion: "A", ToRegion: "B", RoadType: types.PRIMARY, Lon: 1, Lat: 1},
+	})
+	line := orb.LineString{orb.Point{0, 0}, orb.Point{1, 0}}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	res, err := idx.FindCrossingLocations(
+		ctx, "A", "B", line, []string{"PRIMARY"}, 3, 10000, 1000)
+	if err != context.Canceled {
+		t.Errorf("err = %v, want %v", err, context.Canceled)
+	}
+	if res != nil {
+		t.Errorf("res = %v, want nil", res)
+	}
+}
+
+func TestFindClosestCrossing_ContextCancelled(t *testing.T) {
+	idx := newTestBorderIndex(types.BorderCrossingCollection{
+		{FromRegion: "A", ToRegion: "B", RoadType: types.PRIMARY, Lon: 1, Lat: 1},
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	res, err := idx.FindClosestCrossing(ctx, "A", "B", orb.Point{1, 1}, nil)
+	if err != context.Canceled {
+		t.Errorf("err = %v, want %v", err, context.Canceled)
+	}
+	if res != nil {
+		t.Errorf("res = %v, want nil", res)
+	}
+}
+
+func TestFindRegionPath_ContextCancelled(t *testing.T) {
+	idx := newTestBorderIndex(types.BorderCrossingCollection{
+		{FromRegion: "A", ToRegion: "B", RoadType: types.PRIMARY, Lon: 1, Lat: 1},
+		{FromRegion: "B", ToRegion: "C", RoadType: types.PRIMARY, Lon: 2, Lat: 2},
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	path, err := idx.FindRegionPath(ctx, "A", "C")
+	if err != context.Canceled {
+		t.Errorf("err = %v, want %v", err, context.Canceled)
+	}
+	if path != nil {
+		t.Errorf("path = %v, want nil", path)
+	}
 }

@@ -65,11 +65,11 @@ func TestFindCrossingLocations_SimpleConfig_DefaultsApplied(t *testing.T) {
 	var gotLimit int
 	var gotDelta, gotDrop float64
 	bq := &mockBorderQuerier{
-		findCrossingLocationsFn: func(_ context.Context, _, _ string, _ orb.LineString, _ []string, limit int, delta, drop float64) []*index.BorderCrossingResult {
+		findCrossingLocationsFn: func(_ context.Context, _, _ string, _ orb.LineString, _ []string, limit int, delta, drop float64) ([]*index.BorderCrossingResult, error) {
 			gotLimit = limit
 			gotDelta = delta
 			gotDrop = drop
-			return nil
+			return nil, nil
 		},
 	}
 	s := newTestRegionServer(&mockRegionQuerier{}, bq)
@@ -104,7 +104,7 @@ func TestFindCrossingLocations_SimpleConfig_DefaultsApplied(t *testing.T) {
 
 func TestFindCrossingLocations_SimpleConfig_ResponseMapping(t *testing.T) {
 	bq := &mockBorderQuerier{
-		findCrossingLocationsFn: func(_ context.Context, _, _ string, _ orb.LineString, _ []string, _ int, _, _ float64) []*index.BorderCrossingResult {
+		findCrossingLocationsFn: func(_ context.Context, _, _ string, _ orb.LineString, _ []string, _ int, _, _ float64) ([]*index.BorderCrossingResult, error) {
 			return []*index.BorderCrossingResult{
 				{
 					BorderCrossing: &index.BorderCrossing{
@@ -115,7 +115,7 @@ func TestFindCrossingLocations_SimpleConfig_ResponseMapping(t *testing.T) {
 						Location:   orb.Point{5, 10},
 					},
 				},
-			}
+			}, nil
 		},
 	}
 	s := newTestRegionServer(&mockRegionQuerier{}, bq)
@@ -167,7 +167,7 @@ func TestFindCrossingLocations_AdvancedConfig_NoFallbackDefinition(t *testing.T)
 	// Reference distance (300m) exceeds every non-zero definition and there is
 	// no 0-max fallback entry → findCrossingDefinition returns nil → NotFound.
 	bq := &mockBorderQuerier{
-		findClosestCrossingFn: func(_ context.Context, _, _ string, _ orb.Point, _ []string) *index.ClosestBorderCrossing {
+		findClosestCrossingFn: func(_ context.Context, _, _ string, _ orb.Point, _ []string) (*index.ClosestBorderCrossing, error) {
 			return &index.ClosestBorderCrossing{
 				Distance: 300,
 				BorderCrossing: &index.BorderCrossing{
@@ -175,7 +175,7 @@ func TestFindCrossingLocations_AdvancedConfig_NoFallbackDefinition(t *testing.T)
 					ToRegion:   "B",
 					Location:   orb.Point{1, 1},
 				},
-			}
+			}, nil
 		},
 	}
 	s := newTestRegionServer(&mockRegionQuerier{}, bq)
@@ -265,9 +265,9 @@ func TestFindCrossingDefinition_DoesNotMutateInput(t *testing.T) {
 func TestFindCrossingLocations_SimpleConfig_NegativeLimitDefaults(t *testing.T) {
 	var gotLimit int
 	bq := &mockBorderQuerier{
-		findCrossingLocationsFn: func(_ context.Context, _, _ string, _ orb.LineString, _ []string, limit int, _, _ float64) []*index.BorderCrossingResult {
+		findCrossingLocationsFn: func(_ context.Context, _, _ string, _ orb.LineString, _ []string, limit int, _, _ float64) ([]*index.BorderCrossingResult, error) {
 			gotLimit = limit
-			return nil
+			return nil, nil
 		},
 	}
 	s := newTestRegionServer(&mockRegionQuerier{}, bq)
@@ -285,7 +285,7 @@ func TestFindCrossingLocations_SimpleConfig_NegativeLimitDefaults(t *testing.T) 
 func TestFindCrossingLocations_AdvancedConfig_NegativeLimitDefaults(t *testing.T) {
 	var gotLimit int
 	bq := &mockBorderQuerier{
-		findClosestCrossingFn: func(_ context.Context, _, _ string, _ orb.Point, _ []string) *index.ClosestBorderCrossing {
+		findClosestCrossingFn: func(_ context.Context, _, _ string, _ orb.Point, _ []string) (*index.ClosestBorderCrossing, error) {
 			return &index.ClosestBorderCrossing{
 				Distance: 100,
 				BorderCrossing: &index.BorderCrossing{
@@ -293,11 +293,11 @@ func TestFindCrossingLocations_AdvancedConfig_NegativeLimitDefaults(t *testing.T
 					ToRegion:   "B",
 					Location:   orb.Point{1, 1},
 				},
-			}
+			}, nil
 		},
-		findCrossingLocationsFn: func(_ context.Context, _, _ string, _ orb.LineString, _ []string, limit int, _, _ float64) []*index.BorderCrossingResult {
+		findCrossingLocationsFn: func(_ context.Context, _, _ string, _ orb.LineString, _ []string, limit int, _, _ float64) ([]*index.BorderCrossingResult, error) {
 			gotLimit = limit
-			return nil
+			return nil, nil
 		},
 	}
 	s := newTestRegionServer(&mockRegionQuerier{}, bq)
@@ -344,5 +344,20 @@ func TestFindCrossingLocations_InvalidCoordinates(t *testing.T) {
 				t.Errorf("code = %v, want %v", code, codes.InvalidArgument)
 			}
 		})
+	}
+}
+
+func TestFindCrossingLocations_IndexError(t *testing.T) {
+	// The handler must propagate an index error (e.g. context cancellation).
+	bq := &mockBorderQuerier{
+		findCrossingLocationsFn: func(_ context.Context, _, _ string, _ orb.LineString, _ []string, _ int, _, _ float64) ([]*index.BorderCrossingResult, error) {
+			return nil, context.Canceled
+		},
+	}
+	s := newTestRegionServer(&mockRegionQuerier{}, bq)
+
+	_, err := s.FindCrossingLocations(context.Background(), validCrossingReq())
+	if err != context.Canceled {
+		t.Errorf("err = %v, want %v", err, context.Canceled)
 	}
 }

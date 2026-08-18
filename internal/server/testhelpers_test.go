@@ -60,31 +60,31 @@ func (m *mockRegionQuerier) SearchByRadius(center orb.Point, radiusKm float64, e
 // =============================================================================
 
 type mockBorderQuerier struct {
-	findCrossingLocationsFn func(ctx context.Context, fromRegion, toRegion string, line orb.LineString, roadOrder []string, limit int, roadTypeDelta, dropDistance float64) []*index.BorderCrossingResult
-	findClosestCrossingFn   func(ctx context.Context, fromRegion, toRegion string, location orb.Point, validRoadTypes []string) *index.ClosestBorderCrossing
-	findRegionPathFn        func(ctx context.Context, fromRegion, toRegion string) []string
+	findCrossingLocationsFn func(ctx context.Context, fromRegion, toRegion string, line orb.LineString, roadOrder []string, limit int, roadTypeDelta, dropDistance float64) ([]*index.BorderCrossingResult, error)
+	findClosestCrossingFn   func(ctx context.Context, fromRegion, toRegion string, location orb.Point, validRoadTypes []string) (*index.ClosestBorderCrossing, error)
+	findRegionPathFn        func(ctx context.Context, fromRegion, toRegion string) ([]string, error)
 	findRouteRegionPathsFn  func(ctx context.Context, fromRegion, toRegion string, allowedRegions map[string]bool) ([][]string, error)
 }
 
-func (m *mockBorderQuerier) FindCrossingLocations(ctx context.Context, fromRegion, toRegion string, line orb.LineString, roadOrder []string, limit int, roadTypeDelta, dropDistance float64) []*index.BorderCrossingResult {
+func (m *mockBorderQuerier) FindCrossingLocations(ctx context.Context, fromRegion, toRegion string, line orb.LineString, roadOrder []string, limit int, roadTypeDelta, dropDistance float64) ([]*index.BorderCrossingResult, error) {
 	if m.findCrossingLocationsFn != nil {
 		return m.findCrossingLocationsFn(ctx, fromRegion, toRegion, line, roadOrder, limit, roadTypeDelta, dropDistance)
 	}
-	return nil
+	return nil, nil
 }
 
-func (m *mockBorderQuerier) FindClosestCrossing(ctx context.Context, fromRegion, toRegion string, location orb.Point, validRoadTypes []string) *index.ClosestBorderCrossing {
+func (m *mockBorderQuerier) FindClosestCrossing(ctx context.Context, fromRegion, toRegion string, location orb.Point, validRoadTypes []string) (*index.ClosestBorderCrossing, error) {
 	if m.findClosestCrossingFn != nil {
 		return m.findClosestCrossingFn(ctx, fromRegion, toRegion, location, validRoadTypes)
 	}
-	return nil
+	return nil, nil
 }
 
-func (m *mockBorderQuerier) FindRegionPath(ctx context.Context, fromRegion, toRegion string) []string {
+func (m *mockBorderQuerier) FindRegionPath(ctx context.Context, fromRegion, toRegion string) ([]string, error) {
 	if m.findRegionPathFn != nil {
 		return m.findRegionPathFn(ctx, fromRegion, toRegion)
 	}
-	return nil
+	return nil, nil
 }
 
 func (m *mockBorderQuerier) FindRouteRegionPaths(ctx context.Context, fromRegion, toRegion string, allowedRegions map[string]bool) ([][]string, error) {

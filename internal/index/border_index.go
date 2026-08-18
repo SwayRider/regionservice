@@ -83,14 +83,14 @@ func (i *BorderIndex) FindCrossingLocations(
 	limit int,
 	roadTypeDelta float64,
 	dropDistance float64,
-) []*BorderCrossingResult {
+) ([]*BorderCrossingResult, error) {
 	toMap, ok := i.regionCrossings[fromRegion]
 	if !ok {
-		return nil
+		return nil, nil
 	}
 	arr, ok := toMap[toRegion]
 	if !ok {
-		return nil
+		return nil, nil
 	}
 
 	roadFilter := make(map[types.RoadType]int)
@@ -100,6 +100,9 @@ func (i *BorderIndex) FindCrossingLocations(
 
 	cands := make([]*BorderCrossingResult, 0, len(arr))
 	for _, cand := range arr {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if _, ok := roadFilter[cand.RoadType]; !ok {
 			continue
 		}
@@ -145,6 +148,9 @@ func (i *BorderIndex) FindCrossingLocations(
 	cnt := 0
 	var lastPoint orb.Point
 	for _, cand := range cands {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if cnt == 0 {
 			lastPoint = cand.BorderCrossing.Location
 			list = append(list, cand)
@@ -164,10 +170,7 @@ func (i *BorderIndex) FindCrossingLocations(
 		}
 	}
 
-	/*if limit > 0 && len(cands) > limit {
-		return cands[:limit]
-	}*/
-	return list
+	return list, nil
 }
 
 // distanceBucket returns the bucket a distance-to-line falls into. Crossings
@@ -217,14 +220,14 @@ func (i *BorderIndex) FindClosestCrossing(
 	fromRegion, toRegion string,
 	location orb.Point,
 	validRoadTypes []string,
-) *ClosestBorderCrossing {
+) (*ClosestBorderCrossing, error) {
 	toMap, ok := i.regionCrossings[fromRegion]
 	if !ok {
-		return nil
+		return nil, nil
 	}
 	arr, ok := toMap[toRegion]
 	if !ok {
-		return nil
+		return nil, nil
 	}
 
 	roadFilter := make(map[types.RoadType]int)
@@ -234,6 +237,9 @@ func (i *BorderIndex) FindClosestCrossing(
 
 	var crossing *ClosestBorderCrossing
 	for _, bc := range arr {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if len(roadFilter) > 0 {
 			if _, ok := roadFilter[bc.RoadType]; !ok {
 				continue
@@ -248,7 +254,7 @@ func (i *BorderIndex) FindClosestCrossing(
 			}
 		}
 	}
-	return crossing
+	return crossing, nil
 }
 
 // FindRegionPath finds a path of regions from source to destination.
@@ -257,14 +263,14 @@ func (i *BorderIndex) FindClosestCrossing(
 func (i *BorderIndex) FindRegionPath(
 	ctx context.Context,
 	fromRegion, toRegion string,
-) []string {
+) ([]string, error) {
 	passed := make(map[string]struct{})
 	endpoints := make(map[string][]string)
 
 	// No crossing possible at all
 	toMap, ok := i.regionCrossings[fromRegion]
 	if !ok {
-		return nil
+		return nil, nil
 	}
 
 	// Step 1, check direct neighbours
@@ -274,11 +280,15 @@ func (i *BorderIndex) FindRegionPath(
 	}
 
 	if regionList, ok := endpoints[toRegion]; ok {
-		return regionList
+		return regionList, nil
 	}
 
 	// Step 2. Iterate to find path
 	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+
 		// If none found, we are done
 		numAdded := 0
 
@@ -309,9 +319,9 @@ func (i *BorderIndex) FindRegionPath(
 	}
 
 	if regionList, ok := endpoints[toRegion]; ok {
-		return regionList
+		return regionList, nil
 	}
-	return nil
+	return nil, nil
 }
 
 const (

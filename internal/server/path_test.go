@@ -38,8 +38,8 @@ func TestFindRegionPath_MissingTo(t *testing.T) {
 
 func TestFindRegionPath_Success(t *testing.T) {
 	bq := &mockBorderQuerier{
-		findRegionPathFn: func(_ context.Context, from, to string) []string {
-			return []string{"A", "B", "C"}
+		findRegionPathFn: func(_ context.Context, from, to string) ([]string, error) {
+			return []string{"A", "B", "C"}, nil
 		},
 	}
 	s := newTestRegionServer(&mockRegionQuerier{}, bq)
@@ -188,5 +188,23 @@ func TestFindRouteRegionPaths_Success(t *testing.T) {
 	}
 	if len(resp.Paths[0].Regions) != 3 {
 		t.Errorf("path length = %d, want 3", len(resp.Paths[0].Regions))
+	}
+}
+
+func TestFindRegionPath_IndexError(t *testing.T) {
+	// The handler must propagate an index error (e.g. context cancellation).
+	bq := &mockBorderQuerier{
+		findRegionPathFn: func(_ context.Context, from, to string) ([]string, error) {
+			return nil, context.Canceled
+		},
+	}
+	s := newTestRegionServer(&mockRegionQuerier{}, bq)
+
+	_, err := s.FindRegionPath(context.Background(), &regionv1.FindRegionPathRequest{
+		FromRegion: "A",
+		ToRegion:   "B",
+	})
+	if err != context.Canceled {
+		t.Errorf("err = %v, want %v", err, context.Canceled)
 	}
 }

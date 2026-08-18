@@ -110,11 +110,14 @@ func (s *RegionServer) findCrossingLocationsSimple(
 		roadTypeOrder = append(
 			roadTypeOrder, regionv1.RoadType_name[int32(item)])
 	}
-	res := s.BorderIndex().FindCrossingLocations(
+	res, err := s.BorderIndex().FindCrossingLocations(
 		ctx,
 		req.FromRegion, req.ToRegion,
 		line, roadTypeOrder, int(limit),
 		cfg.RoadTypeDelta, cfg.DropDistance)
+	if err != nil {
+		return nil, err
+	}
 
 	resp := &regionv1.FindCrossingLocationsResponse{
 		Crossings: make([]*regionv1.BorderCrossing, 0, len(res)),
@@ -177,11 +180,14 @@ func (s *RegionServer) findCrossingLocationsAdvanced(
 			roadTypeOrder, regionv1.RoadType_name[int32(item)])
 	}
 
-	res := s.BorderIndex().FindCrossingLocations(
+	res, err := s.BorderIndex().FindCrossingLocations(
 		ctx,
 		req.FromRegion, req.ToRegion,
 		line, roadTypeOrder, int(limit),
 		cfgDef.RoadTypeDelta, cfgDef.DropDistance)
+	if err != nil {
+		return nil, err
+	}
 
 	resp := &regionv1.FindCrossingLocationsResponse{
 		Crossings: make([]*regionv1.BorderCrossing, 0, len(res)),
@@ -211,14 +217,20 @@ func closestCrossing(
 	fromRegion, toRegion string,
 	line orb.LineString,
 ) (*index.ClosestBorderCrossing, error) {
-	closestForwardCrossing := borderIndex.FindClosestCrossing(
+	closestForwardCrossing, err := borderIndex.FindClosestCrossing(
 		ctx, fromRegion, toRegion, line[0], nil)
+	if err != nil {
+		return nil, err
+	}
 	if closestForwardCrossing == nil {
 		return nil, status.Error(
 			codes.NotFound, "No forward crossing found")
 	}
-	closestBackwardCrossing := borderIndex.FindClosestCrossing(
+	closestBackwardCrossing, err := borderIndex.FindClosestCrossing(
 		ctx, fromRegion, toRegion, line[1], nil)
+	if err != nil {
+		return nil, err
+	}
 	if closestBackwardCrossing == nil {
 		return nil, status.Error(
 			codes.NotFound, "No backward crossing found")

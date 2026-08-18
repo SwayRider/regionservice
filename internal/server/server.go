@@ -36,9 +36,9 @@ type RegionQuerier interface {
 // BorderQuerier abstracts border crossing lookups.
 // *index.BorderIndex satisfies this interface.
 type BorderQuerier interface {
-	FindCrossingLocations(ctx context.Context, fromRegion, toRegion string, line orb.LineString, roadOrder []string, limit int, roadTypeDelta, dropDistance float64) []*index.BorderCrossingResult
-	FindClosestCrossing(ctx context.Context, fromRegion, toRegion string, location orb.Point, validRoadTypes []string) *index.ClosestBorderCrossing
-	FindRegionPath(ctx context.Context, fromRegion, toRegion string) []string
+	FindCrossingLocations(ctx context.Context, fromRegion, toRegion string, line orb.LineString, roadOrder []string, limit int, roadTypeDelta, dropDistance float64) ([]*index.BorderCrossingResult, error)
+	FindClosestCrossing(ctx context.Context, fromRegion, toRegion string, location orb.Point, validRoadTypes []string) (*index.ClosestBorderCrossing, error)
+	FindRegionPath(ctx context.Context, fromRegion, toRegion string) ([]string, error)
 	FindRouteRegionPaths(ctx context.Context, fromRegion, toRegion string, allowedRegions map[string]bool) ([][]string, error)
 }
 
