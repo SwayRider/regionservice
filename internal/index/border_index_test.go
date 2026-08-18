@@ -105,6 +105,45 @@ func TestFindRegionPath_UnknownFrom(t *testing.T) {
 	}
 }
 
+func TestFindRegionPath_TieBreakDeterministic(t *testing.T) {
+	// A→B→D and A→C→D are both shortest (2 hops). Lexicographic neighbor
+	// order must pick [A B D].
+	idx := newTestBorderIndex(types.BorderCrossingCollection{
+		{FromRegion: "A", ToRegion: "B", RoadType: types.PRIMARY, Lon: 1, Lat: 1},
+		{FromRegion: "A", ToRegion: "C", RoadType: types.PRIMARY, Lon: 1, Lat: 2},
+		{FromRegion: "B", ToRegion: "D", RoadType: types.PRIMARY, Lon: 2, Lat: 1},
+		{FromRegion: "C", ToRegion: "D", RoadType: types.PRIMARY, Lon: 2, Lat: 2},
+	})
+
+	path, err := idx.FindRegionPath(context.Background(), "A", "D")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !equalPath(path, []string{"A", "B", "D"}) {
+		t.Errorf("path = %v, want [A B D]", path)
+	}
+}
+
+func TestFindRegionPath_DeterministicAcrossCalls(t *testing.T) {
+	// Map iteration order varies per call; the result must not.
+	idx := newTestBorderIndex(types.BorderCrossingCollection{
+		{FromRegion: "A", ToRegion: "B", RoadType: types.PRIMARY, Lon: 1, Lat: 1},
+		{FromRegion: "A", ToRegion: "C", RoadType: types.PRIMARY, Lon: 1, Lat: 2},
+		{FromRegion: "B", ToRegion: "D", RoadType: types.PRIMARY, Lon: 2, Lat: 1},
+		{FromRegion: "C", ToRegion: "D", RoadType: types.PRIMARY, Lon: 2, Lat: 2},
+	})
+
+	for i := 0; i < 100; i++ {
+		path, err := idx.FindRegionPath(context.Background(), "A", "D")
+		if err != nil {
+			t.Fatalf("iteration %d: unexpected error: %v", i, err)
+		}
+		if !equalPath(path, []string{"A", "B", "D"}) {
+			t.Fatalf("iteration %d: path = %v, want [A B D]", i, path)
+		}
+	}
+}
+
 // =============================================================================
 // FindRouteRegionPaths Tests
 // =============================================================================

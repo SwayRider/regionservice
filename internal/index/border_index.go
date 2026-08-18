@@ -255,8 +255,9 @@ func (i *BorderIndex) FindClosestCrossing(
 }
 
 // FindRegionPath finds a path of regions from source to destination.
-// Uses breadth-first search through the border crossing graph.
-// Returns nil if no path exists.
+// Uses breadth-first search through the border crossing graph. Neighbors are
+// visited in lexicographic order so the returned shortest path is
+// deterministic. Returns nil if no path exists.
 func (i *BorderIndex) FindRegionPath(
 	ctx context.Context,
 	fromRegion, toRegion string,
@@ -271,7 +272,7 @@ func (i *BorderIndex) FindRegionPath(
 	}
 
 	// Step 1, check direct neighbours
-	for newRegion := range toMap {
+	for _, newRegion := range sortedKeys(toMap) {
 		endpoints[newRegion] = []string{fromRegion, newRegion}
 		passed[newRegion] = struct{}{}
 	}
@@ -292,13 +293,14 @@ func (i *BorderIndex) FindRegionPath(
 		// New list of endpoints
 		newEndpoints := make(map[string][]string)
 
-		for region, list := range endpoints {
+		for _, region := range sortedKeys(endpoints) {
+			list := endpoints[region]
 			toMap, ok := i.regionCrossings[region]
 			if !ok {
 				continue
 			}
 
-			for newRegion := range toMap {
+			for _, newRegion := range sortedKeys(toMap) {
 				if _, ok := passed[newRegion]; ok {
 					continue
 				}
@@ -431,7 +433,8 @@ func (i *BorderIndex) findShortestAllowedPath(
 		numAdded := 0
 		newEndpoints := make(map[string][]string)
 
-		for region, list := range endpoints {
+		for _, region := range sortedKeys(endpoints) {
+			list := endpoints[region]
 			toMap, ok := i.regionCrossings[region]
 			if !ok {
 				continue
@@ -459,16 +462,26 @@ func (i *BorderIndex) findShortestAllowedPath(
 	return nil, nil
 }
 
+// sortedKeys returns the keys of a string-keyed map in lexicographic order,
+// for deterministic graph traversal.
+func sortedKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
 // sortedNeighbors returns the allowed neighbors of a region in lexicographic
 // order, for deterministic graph traversal.
 func sortedNeighbors(neighbors map[string][]*BorderCrossing, allowed map[string]bool) []string {
 	result := make([]string, 0, len(neighbors))
-	for region := range neighbors {
+	for _, region := range sortedKeys(neighbors) {
 		if allowed[region] {
 			result = append(result, region)
 		}
 	}
-	sort.Strings(result)
 	return result
 }
 
