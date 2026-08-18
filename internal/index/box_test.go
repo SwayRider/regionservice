@@ -98,6 +98,30 @@ func TestBox_Size_Empty(t *testing.T) {
 	}
 }
 
+func TestBox_IsEmpty(t *testing.T) {
+	if !NewBox(NE).IsEmpty() {
+		t.Error("new box must be empty")
+	}
+	b := NewBox(NE)
+	b.Add(orb.Point{10, 20})
+	if b.IsEmpty() {
+		t.Error("box with a point must not be empty")
+	}
+}
+
+func TestBox_IsEmpty_Degenerate(t *testing.T) {
+	// Points sharing one coordinate give a zero-area box: not empty.
+	b := NewBox(NE)
+	b.Add(orb.Point{10, 20})
+	b.Add(orb.Point{10, 30})
+	if b.IsEmpty() {
+		t.Error("degenerate (zero-area) box must not be empty")
+	}
+	if got := b.Size(); got != 0 {
+		t.Errorf("degenerate box Size() = %v, want 0", got)
+	}
+}
+
 func TestBox_Add_And_Size(t *testing.T) {
 	b := NewBox(NE)
 	b.Add(orb.Point{10, 20})
@@ -117,7 +141,7 @@ func TestBox_Add_And_Size(t *testing.T) {
 }
 
 func TestBox_Add_IgnoresOutOfQuadrant(t *testing.T) {
-	b := NewBox(NE) // NE: lon >= 0, lat >= 0
+	b := NewBox(NE)           // NE: lon >= 0, lat >= 0
 	b.Add(orb.Point{-10, 10}) // negative lon → ignored
 	if got := b.Size(); got != 0 {
 		t.Errorf("box should be empty after out-of-quadrant point, Size() = %v", got)
@@ -169,6 +193,38 @@ func TestBounds_Extend_EmptyOther(t *testing.T) {
 	b1.Extend(NewBounds()) // extend with empty bounds — should not change
 	if b1.NE.Size() != origSize {
 		t.Errorf("Extend with empty bounds changed NE size: got %v, want %v", b1.NE.Size(), origSize)
+	}
+}
+
+func TestBounds_Extend_Degenerate(t *testing.T) {
+	// A single point in a quadrant yields a degenerate box; it must still
+	// propagate on Extend so axis-aligned geometries stay queryable.
+	b1 := NewBounds()
+	b2 := NewBounds()
+	b2.Add(orb.Point{10, 20})
+
+	b1.Extend(b2)
+	if b1.NE.IsEmpty() {
+		t.Error("degenerate quadrant box must propagate on Extend")
+	}
+	if got := b1.NE.Size(); got != 0 {
+		t.Errorf("single-point box Size() = %v, want 0", got)
+	}
+
+	// Degenerate line boxes propagate too.
+	b3 := NewBounds()
+	b3.Add(orb.Point{30, 40})
+	b3.Add(orb.Point{30, 50})
+	b1.Extend(b3)
+	if b1.NE.IsEmpty() {
+		t.Error("degenerate line box must propagate on Extend")
+	}
+	bounds := b1.NE.Bounds()
+	if bounds.Min.X() != 10 || bounds.Max.X() != 30 {
+		t.Errorf("NE lon extent = %v..%v, want [10, 30]", bounds.Min.X(), bounds.Max.X())
+	}
+	if bounds.Min.Y() != 20 || bounds.Max.Y() != 50 {
+		t.Errorf("NE lat extent = %v..%v, want [20, 50]", bounds.Min.Y(), bounds.Max.Y())
 	}
 }
 

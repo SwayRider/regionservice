@@ -7,10 +7,10 @@ import (
 
 	"github.com/paulmach/orb"
 	"github.com/paulmach/orb/geo"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 	regionv1 "github.com/swayrider/protos/region/v1"
 	log "github.com/swayrider/swlib/logger"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // FindRouteRegionPaths finds all region paths through a geographic corridor.
@@ -50,10 +50,11 @@ func (s *RegionServer) FindRouteRegionPaths(
 	for idx := 0; idx < len(req.Waypoints)-1; idx++ {
 		p1 := orb.Point{req.Waypoints[idx].Lon, req.Waypoints[idx].Lat}
 		p2 := orb.Point{req.Waypoints[idx+1].Lon, req.Waypoints[idx+1].Lat}
-		bl, tr := computeCorridorBox(p1, p2, req.WidthKm)
-		for _, r := range s.RegionIndex().SearchByBox(bl, tr, false) {
-			if !r.IsExtended {
-				allowedRegions[r.Region.Name()] = true
+		for _, box := range computeCorridorBoxes(p1, p2, req.WidthKm) {
+			for _, r := range s.RegionIndex().SearchByBox(box.bottomLeft, box.topRight, false) {
+				if !r.IsExtended {
+					allowedRegions[r.Region.Name()] = true
+				}
 			}
 		}
 	}
@@ -89,11 +90,30 @@ func (s *RegionServer) FindRouteRegionPaths(
 	return &regionv1.FindRouteRegionPathsResponse{Paths: paths}, nil
 }
 
-// computeCorridorBox returns the axis-aligned bounding box for the corridor
-// around the line segment from p1 to p2, expanded by widthKm/2 on each side.
-// Mirrors the pattern used in RegionIndex.SearchByRadius.
-func computeCorridorBox(p1, p2 orb.Point, widthKm float64) (bottomLeft, topRight orb.Point) {
+// corridorBox is one axis-aligned bounding box covering part of a corridor.
+type corridorBox struct {
+	bottomLeft, topRight orb.Point
+}
+
+// computeCorridorBoxes returns the axis-aligned bounding boxes for the
+// corridor around the line segment from p1 to p2, expanded by widthKm/2 on
+// each side. Mirrors the pattern used in RegionIndex.SearchByRadius.
+//
+// A segment crossing the antimeridian yields two boxes, one on each side of
+// the 180th meridian, so the union covers the corridor without the ~360°
+// over-approximation a single min/max box would produce.
+func computeCorridorBoxes(p1, p2 orb.Point, widthKm float64) []corridorBox {
 	r := (widthKm / 2) * 1000
+
+	// Work in a longitude space where p2 is within 180° of p1, so the
+	// corridor never spans more than ~180° of longitude.
+	delta := p2[0] - p1[0]
+	if delta > 180 {
+		p2[0] -= 360
+	} else if delta < -180 {
+		p2[0] += 360
+	}
+
 	minLon := min(geo.PointAtBearingAndDistance(p1, 270, r)[0],
 		geo.PointAtBearingAndDistance(p2, 270, r)[0])
 	maxLon := max(geo.PointAtBearingAndDistance(p1, 90, r)[0],
@@ -102,5 +122,37 @@ func computeCorridorBox(p1, p2 orb.Point, widthKm float64) (bottomLeft, topRight
 		geo.PointAtBearingAndDistance(p2, 180, r)[1])
 	maxLat := max(geo.PointAtBearingAndDistance(p1, 0, r)[1],
 		geo.PointAtBearingAndDistance(p2, 0, r)[1])
-	return orb.Point{minLon, minLat}, orb.Point{maxLon, maxLat}
+
+	switch {
+	case minLon >= -180 && maxLon <= 180:
+		return []corridorBox{{
+			bottomLeft: orb.Point{minLon, minLat},
+			topRight:   orb.Point{maxLon, maxLat},
+		}}
+	case maxLon > 180:
+		// Crosses the 180th meridian eastbound:
+		// [minLon, 180] ∪ [-180, maxLon-360]
+		return []corridorBox{
+			{
+				bottomLeft: orb.Point{minLon, minLat},
+				topRight:   orb.Point{180, maxLat},
+			},
+			{
+				bottomLeft: orb.Point{-180, minLat},
+				topRight:   orb.Point{maxLon - 360, maxLat},
+			},
+		}
+	default: // minLon < -180 — crosses westbound
+		// [minLon+360, 180] ∪ [-180, maxLon]
+		return []corridorBox{
+			{
+				bottomLeft: orb.Point{minLon + 360, minLat},
+				topRight:   orb.Point{180, maxLat},
+			},
+			{
+				bottomLeft: orb.Point{-180, minLat},
+				topRight:   orb.Point{maxLon, maxLat},
+			},
+		}
+	}
 }

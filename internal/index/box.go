@@ -8,11 +8,28 @@
 //
 // To handle geometries that cross the antimeridian (180° longitude), the package
 // divides the world into four quadrants (NW, NE, SW, SE) and maintains separate
-// bounding boxes for each. This allows correct spatial queries for regions
-// that span the date line.
+// bounding boxes for each. This lets the R-tree find candidates for regions
+// that span the date line. The quadrant boxes are the candidate half of the
+// story; the exact containment/intersection checks additionally unwrap
+// longitudes around the query (see antimeridian.go) so planar tests are
+// consistent across the date line.
+//
+// Degenerate (zero-area) quadrant boxes from axis-aligned regions are widened
+// to the shape's extent before insertion (see bboxSetFromBounds) so such
+// regions stay queryable.
 package index
 
-import "github.com/paulmach/orb"
+import (
+	"github.com/dhconnelly/rtreego"
+	"github.com/paulmach/orb"
+)
+
+// bboxPad is the minimum width and height of an R-tree bounding box, in
+// degrees. Zero-area quadrant boxes (regions with axis-aligned vertices on
+// the 0/±180 meridians or the 0 parallel) are padded to this size so the
+// R-tree can still return them as candidates; the exact containment checks
+// filter them later, so the padding can never produce false matches.
+const bboxPad = 1e-9
 
 // BoxLocation represents one of the four world quadrants.
 // Used to handle geometries that cross the antimeridian.
@@ -134,10 +151,17 @@ func (b *Box) Add(pt orb.Point) {
 	}
 }
 
+// IsEmpty returns true if no point has been added to this box, i.e. the
+// bounds are still in their inverted initial state.
+func (b Box) IsEmpty() bool {
+	return b.max[0] < b.min[0] || b.max[1] < b.min[1]
+}
+
 // Size returns the area of the bounding box in square degrees.
-// Returns 0 if the box is empty (inverted bounds).
+// Returns 0 if the box is empty (inverted bounds) or degenerate (zero
+// width or height); use IsEmpty to distinguish the two.
 func (b Box) Size() float64 {
-	if b.max[0] < b.min[0] || b.max[1] < b.min[1] {
+	if b.IsEmpty() {
 		return 0
 	}
 	return (b.max[0] - b.min[0]) * (b.max[1] - b.min[1])
@@ -180,20 +204,22 @@ func (b *Bounds) Add(pt orb.Point) {
 }
 
 // Extend expands these bounds to include all points from another Bounds.
+// Degenerate boxes (zero area but with points) are propagated too, so
+// axis-aligned geometries stay queryable.
 func (b *Bounds) Extend(other *Bounds) {
-	if other.NW.Size() > 0 {
+	if !other.NW.IsEmpty() {
 		b.NW.Add(other.NW.min)
 		b.NW.Add(other.NW.max)
 	}
-	if other.NE.Size() > 0 {
+	if !other.NE.IsEmpty() {
 		b.NE.Add(other.NE.min)
 		b.NE.Add(other.NE.max)
 	}
-	if other.SW.Size() > 0 {
+	if !other.SW.IsEmpty() {
 		b.SW.Add(other.SW.min)
 		b.SW.Add(other.SW.max)
 	}
-	if other.SE.Size() > 0 {
+	if !other.SE.IsEmpty() {
 		b.SE.Add(other.SE.min)
 		b.SE.Add(other.SE.max)
 	}
@@ -207,6 +233,74 @@ func (b Bounds) Boxes() []*Box {
 		b.SW,
 		b.SE,
 	}
+}
+
+// bboxSetFromBounds converts the quadrant boxes into the R-tree bounding
+// boxes used for candidate filtering, one per quadrant (nil for empty
+// quadrants, matching BoxLocation indexing).
+//
+// Boxes with no points are dropped. Degenerate (zero-area) boxes — regions
+// with axis-aligned vertices on the 0/±180 meridians or the 0 parallel —
+// are widened to the shape's overall extent in the degenerate dimension(s):
+// the quadrant split alone leaves such boxes as bare lines or points that
+// never cover the region's interior, and rtreego's exclusive intersection
+// test never matches an exact-zero-width rect. A small pad is added so
+// queries touching the extent boundary still match. Shapes whose longitude
+// extent exceeds 180° are treated as date-line straddlers and left
+// unexpanded: their degenerate side is a bare line or point on the ±180
+// meridian with no queryable area (the area-bearing side always has a
+// non-degenerate box), and widening it would admit every query as a
+// candidate against the planar-inconsistent raw ring, causing false
+// positives at the opposite meridian.
+func bboxSetFromBounds(bounds *Bounds) ([]*rtreego.Rect, error) {
+	boxes := bounds.Boxes()
+
+	// Overall extent across all quadrants, used to widen degenerate boxes.
+	var gMinLon, gMaxLon, gMinLat, gMaxLat float64
+	have := false
+	for _, box := range boxes {
+		if box.IsEmpty() {
+			continue
+		}
+		b := box.Bounds()
+		if !have {
+			gMinLon, gMaxLon, gMinLat, gMaxLat = b.Min[0], b.Max[0], b.Min[1], b.Max[1]
+			have = true
+		} else {
+			gMinLon = min(gMinLon, b.Min[0])
+			gMaxLon = max(gMaxLon, b.Max[0])
+			gMinLat = min(gMinLat, b.Min[1])
+			gMaxLat = max(gMaxLat, b.Max[1])
+		}
+	}
+
+	expandLon := have && gMaxLon-gMinLon <= 180
+
+	bboxSet := make([]*rtreego.Rect, len(boxes))
+	for i, box := range boxes {
+		if box.IsEmpty() {
+			continue
+		}
+		b := box.Bounds()
+		minP, maxP := b.Min, b.Max
+		if expandLon && maxP[0]-minP[0] < bboxPad {
+			minP[0] = gMinLon - bboxPad/2
+			maxP[0] = gMaxLon + bboxPad/2
+		}
+		if maxP[1]-minP[1] < bboxPad {
+			minP[1] = gMinLat - bboxPad/2
+			maxP[1] = gMaxLat + bboxPad/2
+		}
+		bbox, err := rtreego.NewRectFromPoints(
+			rtreego.Point{minP[0], minP[1]},
+			rtreego.Point{maxP[0], maxP[1]},
+		)
+		if err != nil {
+			return nil, err
+		}
+		bboxSet[i] = &bbox
+	}
+	return bboxSet, nil
 }
 
 // LineSegment represents a line between two points.

@@ -307,6 +307,48 @@ The geodata directory must be mounted at the path configured by `GEODATA_DIR`. I
 - **Core Region**: Primary coverage area for routing. Points in core regions are routed using that region's Valhalla instance.
 - **Extended Region**: Overlap area that extends into adjacent regions. Used for cross-region routing to ensure seamless transitions.
 
+## Geospatial Behavior
+
+### Antimeridian (date line) handling
+
+Regions whose boundaries cross the 180th meridian are supported. Before any
+exact containment or intersection test, polygon vertices are unwrapped —
+shifted by the multiple of ±360° that brings them closest to the query's
+reference longitude — so a ring spanning the date line is treated as the
+contiguous shape it actually covers instead of a ~360° planar artifact. The
+per-quadrant bounding boxes used for R-tree candidate filtering are unaffected.
+
+- **Point queries** match a date-line-crossing region from either side.
+- **Box queries** that cross the date line (`bottomLeft.lon > topRight.lon`)
+  are split at ±180° and searched on both sides.
+- **Radius queries** wrap their bounding-box corners into [-180, 180], so a
+  circle straddling the date line covers both sides.
+- **Corridor boxes** (`FindRouteRegionPaths`) are computed in an unwrapped
+  longitude space and split into one box per side of the date line, avoiding
+  the ~360° over-approximation a single min/max box would produce.
+
+### Intersection semantics
+
+Region-vs-box and region-vs-circle tests are exact: besides the
+corner/vertex checks, polygon edges are tested against the box boundary
+(Liang–Barsky clipping) and against the circle (equirectangular projection
+plus planar segment distance). Touching the boundary counts as intersecting.
+The circle edge test approximates geodesic distance with an equirectangular
+projection around the circle center; the error is below ~2% for practical
+radii and only matters at the decision boundary.
+
+Regions with axis-aligned vertices (edges exactly on the 0/±180 meridians or
+the 0 parallel) produce zero-area quadrant bounding boxes; these are widened
+to the shape's extent at index time so the region stays queryable.
+
+Widening is skipped for shapes whose longitude extent exceeds 180° (date-line
+straddlers). Their degenerate boxes are bare lines or points on the ±180
+meridian with no queryable area — the area-bearing side always has a
+non-degenerate box — so nothing is lost. Widening them would instead admit
+every query as a candidate against the planar-inconsistent raw ring and
+produce false positives at the opposite meridian, so they are deliberately
+left unexpanded.
+
 ## Building
 
 ```bash
