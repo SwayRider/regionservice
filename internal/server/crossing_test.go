@@ -361,3 +361,156 @@ func TestFindCrossingLocations_IndexError(t *testing.T) {
 		t.Errorf("err = %v, want %v", err, context.Canceled)
 	}
 }
+
+// =============================================================================
+// Request-mutation regression tests (point 16)
+// =============================================================================
+
+func TestFindCrossingLocations_SimpleConfig_DoesNotMutateConfig(t *testing.T) {
+	cfg := &regionv1.BorderCrossingSimpleConfig{
+		RoadTypeOrder: nil,
+		RoadTypeDelta: 0,
+		DropDistance:  0,
+	}
+	req := validCrossingReq()
+	req.ConfigOneof = &regionv1.FindCrossingLocationsRequest_SimpleConfig{SimpleConfig: cfg}
+
+	s := newTestRegionServer(&mockRegionQuerier{}, &mockBorderQuerier{})
+	if _, err := s.FindCrossingLocations(context.Background(), req); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.RoadTypeOrder != nil {
+		t.Errorf("RoadTypeOrder mutated: %v", cfg.RoadTypeOrder)
+	}
+	if cfg.RoadTypeDelta != 0 {
+		t.Errorf("RoadTypeDelta mutated: %v", cfg.RoadTypeDelta)
+	}
+	if cfg.DropDistance != 0 {
+		t.Errorf("DropDistance mutated: %v", cfg.DropDistance)
+	}
+}
+
+func TestFindCrossingLocations_AdvancedConfig_DoesNotMutateDefinitions(t *testing.T) {
+	def := &regionv1.BorderCrossingDefinition{
+		MaxBorderDistance: 100,
+		RoadTypeDelta:     0,
+		DropDistance:      0,
+		RoadTypeOrder:     []regionv1.RoadType{regionv1.RoadType_MOTORWAY},
+	}
+	bq := &mockBorderQuerier{
+		findClosestCrossingFn: func(_ context.Context, _, _ string, _ orb.Point, _ []string) (*index.ClosestBorderCrossing, error) {
+			return &index.ClosestBorderCrossing{
+				Distance: 50,
+				BorderCrossing: &index.BorderCrossing{
+					FromRegion: "A",
+					ToRegion:   "B",
+					Location:   orb.Point{1, 1},
+				},
+			}, nil
+		},
+	}
+	s := newTestRegionServer(&mockRegionQuerier{}, bq)
+
+	req := validCrossingReq()
+	req.ConfigOneof = &regionv1.FindCrossingLocationsRequest_AdvancedConfig{
+		AdvancedConfig: &regionv1.BorderCrossingAdvancedConfig{
+			Definitions: []*regionv1.BorderCrossingDefinition{def},
+		},
+	}
+	if _, err := s.FindCrossingLocations(context.Background(), req); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if def.RoadTypeDelta != 0 {
+		t.Errorf("definition RoadTypeDelta mutated: %v", def.RoadTypeDelta)
+	}
+	if def.DropDistance != 0 {
+		t.Errorf("definition DropDistance mutated: %v", def.DropDistance)
+	}
+}
+
+// =============================================================================
+// Unknown road-type regression tests (point 17)
+// =============================================================================
+
+func TestRoadTypeOrderStrings(t *testing.T) {
+	got := roadTypeOrderStrings([]regionv1.RoadType{
+		regionv1.RoadType_MOTORWAY,
+		regionv1.RoadType(99), // out of range
+		regionv1.RoadType_TRUNK,
+		regionv1.RoadType(-1), // out of range
+	})
+	want := []string{"MOTORWAY", "TRUNK"}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("got[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestRoadTypeToProto(t *testing.T) {
+	tests := []struct {
+		rt   types.RoadType
+		want regionv1.RoadType
+		ok   bool
+	}{
+		{types.MOTORWAY, regionv1.RoadType_MOTORWAY, true},
+		{types.TRUNK, regionv1.RoadType_TRUNK, true},
+		{types.PRIMARY, regionv1.RoadType_PRIMARY, true},
+		{types.SECONDARY, regionv1.RoadType_SECONDARY, true},
+		{types.RoadType("MOTORWAY"), regionv1.RoadType_MOTORWAY, true}, // case-insensitive
+		{types.RoadType("residential"), 0, false},
+		{types.RoadType(""), 0, false},
+	}
+
+	for _, tt := range tests {
+		got, ok := roadTypeToProto(tt.rt)
+		if ok != tt.ok || got != tt.want {
+			t.Errorf("roadTypeToProto(%q) = (%v, %v), want (%v, %v)", tt.rt, got, ok, tt.want, tt.ok)
+		}
+	}
+}
+
+func TestFindCrossingLocations_UnknownRoadType_Skipped(t *testing.T) {
+	bq := &mockBorderQuerier{
+		findCrossingLocationsFn: func(_ context.Context, _, _ string, _ orb.LineString, _ []string, _ int, _, _ float64) ([]*index.BorderCrossingResult, error) {
+			return []*index.BorderCrossingResult{
+				{
+					BorderCrossing: &index.BorderCrossing{
+						FromRegion: "A",
+						ToRegion:   "B",
+						RoadType:   types.RoadType("residential"),
+						OsmId:      1,
+						Location:   orb.Point{1, 1},
+					},
+				},
+				{
+					BorderCrossing: &index.BorderCrossing{
+						FromRegion: "A",
+						ToRegion:   "B",
+						RoadType:   types.MOTORWAY,
+						OsmId:      2,
+						Location:   orb.Point{2, 2},
+					},
+				},
+			}, nil
+		},
+	}
+	s := newTestRegionServer(&mockRegionQuerier{}, bq)
+
+	resp, err := s.FindCrossingLocations(context.Background(), validCrossingReq())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resp.Crossings) != 1 {
+		t.Fatalf("expected 1 crossing (unknown road type skipped), got %d", len(resp.Crossings))
+	}
+	if resp.Crossings[0].OsmId != 2 {
+		t.Errorf("OsmId = %d, want 2", resp.Crossings[0].OsmId)
+	}
+	if resp.Crossings[0].RoadType != regionv1.RoadType_MOTORWAY {
+		t.Errorf("RoadType = %v, want MOTORWAY", resp.Crossings[0].RoadType)
+	}
+}

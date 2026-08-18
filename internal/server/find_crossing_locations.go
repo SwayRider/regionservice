@@ -11,6 +11,7 @@ import (
 	"github.com/swayrider/protos/common_types/geo"
 	regionv1 "github.com/swayrider/protos/region/v1"
 	"github.com/swayrider/regionservice/internal/index"
+	"github.com/swayrider/regionservice/internal/types"
 	log "github.com/swayrider/swlib/logger"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -75,14 +76,16 @@ func (s *RegionServer) FindCrossingLocations(
 }
 
 // findCrossingLocationsSimple handles simple config border crossing searches.
-// Uses fixed road type priority and distance thresholds.
+// Uses fixed road type priority and distance thresholds. Defaults are computed
+// into locals so the request's config is never mutated.
 func (s *RegionServer) findCrossingLocationsSimple(
 	ctx context.Context,
 	req *regionv1.FindCrossingLocationsRequest,
 	cfg *regionv1.BorderCrossingSimpleConfig,
 ) (*regionv1.FindCrossingLocationsResponse, error) {
-	if cfg.RoadTypeOrder == nil {
-		cfg.RoadTypeOrder = []regionv1.RoadType{
+	roadTypeOrder := cfg.RoadTypeOrder
+	if roadTypeOrder == nil {
+		roadTypeOrder = []regionv1.RoadType{
 			regionv1.RoadType_MOTORWAY,
 			regionv1.RoadType_TRUNK,
 			regionv1.RoadType_PRIMARY,
@@ -93,11 +96,13 @@ func (s *RegionServer) findCrossingLocationsSimple(
 	if limit <= 0 {
 		limit = 3
 	}
-	if cfg.RoadTypeDelta <= 0 {
-		cfg.RoadTypeDelta = 10000
+	roadTypeDelta := cfg.RoadTypeDelta
+	if roadTypeDelta <= 0 {
+		roadTypeDelta = 10000
 	}
-	if cfg.DropDistance <= 0 {
-		cfg.DropDistance = cfg.RoadTypeDelta * 0.1
+	dropDistance := cfg.DropDistance
+	if dropDistance <= 0 {
+		dropDistance = roadTypeDelta * 0.1
 	}
 
 	line := orb.LineString{
@@ -105,42 +110,21 @@ func (s *RegionServer) findCrossingLocationsSimple(
 		orb.Point{req.ToLocation.Lon, req.ToLocation.Lat},
 	}
 
-	roadTypeOrder := make([]string, 0, len(cfg.RoadTypeOrder))
-	for _, item := range cfg.RoadTypeOrder {
-		roadTypeOrder = append(
-			roadTypeOrder, regionv1.RoadType_name[int32(item)])
-	}
 	res, err := s.BorderIndex().FindCrossingLocations(
 		ctx,
 		req.FromRegion, req.ToRegion,
-		line, roadTypeOrder, int(limit),
-		cfg.RoadTypeDelta, cfg.DropDistance)
+		line, roadTypeOrderStrings(roadTypeOrder), int(limit),
+		roadTypeDelta, dropDistance)
 	if err != nil {
 		return nil, err
 	}
 
-	resp := &regionv1.FindCrossingLocationsResponse{
-		Crossings: make([]*regionv1.BorderCrossing, 0, len(res)),
-	}
-	for _, item := range res {
-		resp.Crossings = append(resp.Crossings, &regionv1.BorderCrossing{
-			FromRegion: item.BorderCrossing.FromRegion,
-			ToRegion:   item.BorderCrossing.ToRegion,
-			RoadType: regionv1.RoadType(
-				regionv1.RoadType_value[strings.ToUpper(
-					item.BorderCrossing.RoadType.String())]),
-			OsmId: int64(item.BorderCrossing.OsmId),
-			Location: &geo.Coordinate{
-				Lon: item.BorderCrossing.Location.X(),
-				Lat: item.BorderCrossing.Location.Y(),
-			},
-		})
-	}
-	return resp, nil
+	return buildCrossingsResponse(res), nil
 }
 
 // findCrossingLocationsAdvanced handles advanced config border crossing searches.
-// Selects configuration based on distance to the closest crossing.
+// Selects configuration based on distance to the closest crossing. Defaults are
+// computed into locals so the request's definitions are never mutated.
 func (s *RegionServer) findCrossingLocationsAdvanced(
 	ctx context.Context,
 	req *regionv1.FindCrossingLocationsRequest,
@@ -167,46 +151,25 @@ func (s *RegionServer) findCrossingLocationsAdvanced(
 			codes.NotFound, "No definition found")
 	}
 
-	if cfgDef.RoadTypeDelta <= 0 {
-		cfgDef.RoadTypeDelta = refCrossing.Distance
+	roadTypeDelta := cfgDef.RoadTypeDelta
+	if roadTypeDelta <= 0 {
+		roadTypeDelta = refCrossing.Distance
 	}
-	if cfgDef.DropDistance <= 0 {
-		cfgDef.DropDistance = cfgDef.RoadTypeDelta * 0.1
-	}
-
-	roadTypeOrder := make([]string, 0, len(cfgDef.RoadTypeOrder))
-	for _, item := range cfgDef.RoadTypeOrder {
-		roadTypeOrder = append(
-			roadTypeOrder, regionv1.RoadType_name[int32(item)])
+	dropDistance := cfgDef.DropDistance
+	if dropDistance <= 0 {
+		dropDistance = roadTypeDelta * 0.1
 	}
 
 	res, err := s.BorderIndex().FindCrossingLocations(
 		ctx,
 		req.FromRegion, req.ToRegion,
-		line, roadTypeOrder, int(limit),
-		cfgDef.RoadTypeDelta, cfgDef.DropDistance)
+		line, roadTypeOrderStrings(cfgDef.RoadTypeOrder), int(limit),
+		roadTypeDelta, dropDistance)
 	if err != nil {
 		return nil, err
 	}
 
-	resp := &regionv1.FindCrossingLocationsResponse{
-		Crossings: make([]*regionv1.BorderCrossing, 0, len(res)),
-	}
-	for _, item := range res {
-		resp.Crossings = append(resp.Crossings, &regionv1.BorderCrossing{
-			FromRegion: item.BorderCrossing.FromRegion,
-			ToRegion:   item.BorderCrossing.ToRegion,
-			RoadType: regionv1.RoadType(
-				regionv1.RoadType_value[strings.ToUpper(
-					item.BorderCrossing.RoadType.String())]),
-			OsmId: int64(item.BorderCrossing.OsmId),
-			Location: &geo.Coordinate{
-				Lon: item.BorderCrossing.Location.X(),
-				Lat: item.BorderCrossing.Location.Y(),
-			},
-		})
-	}
-	return resp, nil
+	return buildCrossingsResponse(res), nil
 }
 
 // closestCrossing finds the closest border crossing to either endpoint of a line.
@@ -285,4 +248,58 @@ func findCrossingDefinition(
 		}
 	}
 	return nil
+}
+
+// roadTypeOrderStrings converts a proto road-type priority list into the
+// string form expected by the border index, skipping any unknown enum values
+// (which would otherwise map to an empty string and silently match crossings
+// with no road type).
+func roadTypeOrderStrings(order []regionv1.RoadType) []string {
+	result := make([]string, 0, len(order))
+	for _, item := range order {
+		if name, ok := regionv1.RoadType_name[int32(item)]; ok {
+			result = append(result, name)
+		}
+	}
+	return result
+}
+
+// roadTypeToProto converts an index road type to the proto enum, reporting
+// whether the road type is recognized. Unknown road types (which previously
+// fell through to the MOTORWAY zero value) are reported as !ok so callers can
+// skip them instead of mislabeling them.
+func roadTypeToProto(rt types.RoadType) (regionv1.RoadType, bool) {
+	name := strings.ToUpper(types.RoadTypeFromString(rt.String()).String())
+	v, ok := regionv1.RoadType_value[name]
+	if !ok {
+		return 0, false
+	}
+	return regionv1.RoadType(v), true
+}
+
+// buildCrossingsResponse maps index crossing results to the proto response,
+// skipping crossings whose road type is not a known proto enum.
+func buildCrossingsResponse(
+	res []*index.BorderCrossingResult,
+) *regionv1.FindCrossingLocationsResponse {
+	resp := &regionv1.FindCrossingLocationsResponse{
+		Crossings: make([]*regionv1.BorderCrossing, 0, len(res)),
+	}
+	for _, item := range res {
+		roadType, ok := roadTypeToProto(item.BorderCrossing.RoadType)
+		if !ok {
+			continue
+		}
+		resp.Crossings = append(resp.Crossings, &regionv1.BorderCrossing{
+			FromRegion: item.BorderCrossing.FromRegion,
+			ToRegion:   item.BorderCrossing.ToRegion,
+			RoadType:   roadType,
+			OsmId:      int64(item.BorderCrossing.OsmId),
+			Location: &geo.Coordinate{
+				Lon: item.BorderCrossing.Location.X(),
+				Lat: item.BorderCrossing.Location.Y(),
+			},
+		})
+	}
+	return resp
 }

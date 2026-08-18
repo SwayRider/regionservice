@@ -36,7 +36,6 @@ import (
 	"fmt"
 
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
-	"google.golang.org/grpc"
 	"github.com/swayrider/grpcclients"
 	"github.com/swayrider/grpcclients/authclient"
 	healthv1 "github.com/swayrider/protos/health/v1"
@@ -48,6 +47,7 @@ import (
 	"github.com/swayrider/swlib/app"
 	"github.com/swayrider/swlib/cache"
 	log "github.com/swayrider/swlib/logger"
+	"google.golang.org/grpc"
 )
 
 // Configuration field constants.
@@ -172,11 +172,11 @@ func bootstrapFn(a app.App) error {
 	ri := app.GetAppData[*index.RegionIndex](a, "RegionIndex")
 	bi := app.GetAppData[*index.BorderIndex](a, "BorderIndex")
 
-	err := bootstrap.Bootstrap(reader, ri, bi)
-	if err != nil {
+	if err := bootstrap.Bootstrap(reader, ri, bi); err != nil {
+		// Fatalf exits the process; bootstrap failure is unrecoverable.
 		lg.Fatalf("failed to bootstrap: %v", err)
 	}
-	return err
+	return nil
 }
 
 // grpcRegionRegistrar registers the RegionService gRPC server with the registrar.
