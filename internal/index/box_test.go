@@ -54,40 +54,6 @@ func TestBoxLocation_HasPoint(t *testing.T) {
 }
 
 // =============================================================================
-// BoxLocation.TransformPoint Tests
-// =============================================================================
-
-func TestBoxLocation_TransformPoint(t *testing.T) {
-	tests := []struct {
-		name     string
-		location BoxLocation
-		pt       orb.Point
-		wantLon  float64
-	}{
-		{"NE: point already in quadrant", NE, orb.Point{10, 10}, 10},
-		{"NE: negative lon shifted +360", NE, orb.Point{-10, 10}, 350},
-		{"NW: point already in quadrant", NW, orb.Point{-10, 10}, -10},
-		{"NW: positive lon shifted -360", NW, orb.Point{10, 10}, -350},
-		{"SE: point already in quadrant", SE, orb.Point{10, -10}, 10},
-		{"SE: negative lon shifted +360", SE, orb.Point{-10, -10}, 350},
-		{"SW: point already in quadrant", SW, orb.Point{-10, -10}, -10},
-		{"SW: positive lon shifted -360", SW, orb.Point{10, -10}, -350},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := tt.location.TransformPoint(tt.pt)
-			if got[0] != tt.wantLon {
-				t.Errorf("TransformPoint(%v).X = %v, want %v", tt.pt, got[0], tt.wantLon)
-			}
-			if got[1] != tt.pt[1] {
-				t.Errorf("TransformPoint(%v).Y changed: got %v, want %v", tt.pt, got[1], tt.pt[1])
-			}
-		})
-	}
-}
-
-// =============================================================================
 // Box Tests
 // =============================================================================
 
@@ -225,50 +191,5 @@ func TestBounds_Extend_Degenerate(t *testing.T) {
 	}
 	if bounds.Min.Y() != 20 || bounds.Max.Y() != 50 {
 		t.Errorf("NE lat extent = %v..%v, want [20, 50]", bounds.Min.Y(), bounds.Max.Y())
-	}
-}
-
-// =============================================================================
-// Rect Tests
-// =============================================================================
-
-func TestRect_Contains(t *testing.T) {
-	outer := NewRect(orb.Point{0, 0}, orb.Point{10, 10})
-	inner := NewRect(orb.Point{2, 2}, orb.Point{8, 8})
-	partial := NewRect(orb.Point{5, 5}, orb.Point{15, 15})
-
-	if !outer.Contains(inner) {
-		t.Error("outer should contain inner")
-	}
-	if outer.Contains(partial) {
-		t.Error("outer should not contain partial overlap")
-	}
-	if inner.Contains(outer) {
-		t.Error("inner should not contain outer")
-	}
-}
-
-func TestRect_Within(t *testing.T) {
-	outer := NewRect(orb.Point{0, 0}, orb.Point{10, 10})
-	inner := NewRect(orb.Point{2, 2}, orb.Point{8, 8})
-
-	if !inner.Within(outer) {
-		t.Error("inner should be within outer")
-	}
-	if outer.Within(inner) {
-		t.Error("outer should not be within inner")
-	}
-}
-
-func TestRect_Intersects(t *testing.T) {
-	r1 := NewRect(orb.Point{0, 0}, orb.Point{5, 5})
-	r2 := NewRect(orb.Point{3, 3}, orb.Point{8, 8})   // overlaps
-	r3 := NewRect(orb.Point{6, 6}, orb.Point{10, 10}) // no overlap
-
-	if !r1.Intersects(r2) {
-		t.Error("r1 and r2 should intersect")
-	}
-	if r1.Intersects(r3) {
-		t.Error("r1 and r3 should not intersect")
 	}
 }

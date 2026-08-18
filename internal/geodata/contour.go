@@ -4,6 +4,7 @@ package geodata
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -50,14 +51,28 @@ func (r *GeoDataReader) GetContour(
 		return
 	}
 
-	switch v := data.(type) {
-	case geojson.FeatureCollection:
-		features = &v
-	case geojson.Feature:
-		features = &geojson.FeatureCollection{
-			Features: []geojson.Feature{v},
-		}
+	features, err = toFeatureCollection(data)
+	if err != nil {
+		lg.Warnf("unsupported geojson in %s: %v", path, err)
+		return
 	}
 
 	return
+}
+
+// toFeatureCollection converts an unmarshalled GeoJSON value into a
+// FeatureCollection. Unmarshal yields either a Feature or a FeatureCollection;
+// anything else is rejected with an explicit error so callers never receive a
+// nil collection alongside a nil error.
+func toFeatureCollection(data interface{}) (*geojson.FeatureCollection, error) {
+	switch v := data.(type) {
+	case geojson.FeatureCollection:
+		return &v, nil
+	case geojson.Feature:
+		return &geojson.FeatureCollection{
+			Features: []geojson.Feature{v},
+		}, nil
+	default:
+		return nil, fmt.Errorf("unsupported geojson type %T", data)
+	}
 }

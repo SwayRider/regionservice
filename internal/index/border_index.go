@@ -7,7 +7,6 @@ import (
 	"math"
 	"sort"
 
-	//"github.com/dhconnelly/rtreego"
 	"github.com/paulmach/orb"
 	"github.com/paulmach/orb/geo"
 	"github.com/swayrider/regionservice/internal/types"
@@ -38,7 +37,6 @@ type BorderIndex struct {
 func NewBorderIndex() *BorderIndex {
 	return &BorderIndex{
 		regionCrossings: make(RegionCrossings),
-		//crossingLocations: make(CrossingLocations),
 	}
 }
 
@@ -56,7 +54,6 @@ func (i *BorderIndex) Add(
 			Location:   orb.Point{c.Lon, c.Lat},
 		}
 		i.regionCrossings.add(bc)
-		//i.crossingLocations.add(bc)
 	}
 }
 
@@ -494,17 +491,3 @@ func (rc *RegionCrossings) add(bc *BorderCrossing) {
 	}
 	toMap[bc.ToRegion] = append(toMap[bc.ToRegion], bc)
 }
-
-/*func (cl *CrossingLocations) add(bc *BorderCrossing) {
-	toMap, ok := (*cl)[bc.FromRegion]
-	if !ok {
-		toMap = make(map[string]*rtreego.Rtree)
-		(*cl)[bc.FromRegion] = toMap
-	}
-	tree, ok := toMap[bc.ToRegion]
-	if !ok {
-		tree = rtreego.NewTree(2, 10, 25)
-		toMap[bc.ToRegion] = tree
-	}
-	tree.Insert(NewSpatialBorderCrossing(bc))
-}*/

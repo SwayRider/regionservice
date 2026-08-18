@@ -91,27 +91,6 @@ func (bl BoxLocation) TopRight() orb.Point {
 	}
 }
 
-// TransformPoint adjusts a point's longitude to fit within this quadrant.
-// Used for handling antimeridian crossings by shifting longitude by 360°.
-func (bl BoxLocation) TransformPoint(pt orb.Point) orb.Point {
-	if bl.HasPoint(pt) {
-		return pt
-	}
-
-	npt := orb.Point{pt.X(), pt.Y()}
-	switch bl {
-	case NW, SW:
-		if npt[0] > 0 {
-			npt[0] -= 360
-		}
-	case NE, SE:
-		if npt[0] < 0 {
-			npt[0] += 360
-		}
-	}
-	return npt
-}
-
 // Box represents an axis-aligned bounding box within a specific quadrant.
 // Coordinates are in longitude/latitude format.
 type Box struct {
@@ -301,61 +280,4 @@ func bboxSetFromBounds(bounds *Bounds) ([]*rtreego.Rect, error) {
 		bboxSet[i] = &bbox
 	}
 	return bboxSet, nil
-}
-
-// LineSegment represents a line between two points.
-type LineSegment struct {
-	p1 orb.Point // Start point
-	p2 orb.Point // End point
-}
-
-// NewLineSegment creates a new line segment between two points.
-func NewLineSegment(p1, p2 orb.Point) *LineSegment {
-	return &LineSegment{
-		p1: p1,
-		p2: p2,
-	}
-}
-
-// Rect represents an axis-aligned rectangle for intersection tests.
-type Rect struct {
-	min orb.Point // Minimum corner (bottom-left)
-	max orb.Point // Maximum corner (top-right)
-}
-
-// NewRect creates a new rectangle from corner points.
-func NewRect(min, max orb.Point) *Rect {
-	return &Rect{
-		min: min,
-		max: max,
-	}
-}
-
-// Contains returns true if this rectangle fully contains another rectangle.
-func (r Rect) Contains(r2 *Rect) bool {
-	return r.min[0] <= r2.min[0] && r.max[0] >= r2.max[0] &&
-		r.min[1] <= r2.min[1] && r.max[1] >= r2.max[1]
-}
-
-// Within returns true if this rectangle is fully contained by another rectangle.
-func (r Rect) Within(r2 *Rect) bool {
-	return r2.Contains(&r)
-}
-
-// Intersects returns true if this rectangle overlaps with another rectangle.
-func (r Rect) Intersects(r2 *Rect) bool {
-	return r.min[0] < r2.max[0] && r.max[0] > r2.min[0] &&
-		r.min[1] < r2.max[1] && r.max[1] > r2.min[1]
-}
-
-// ContainsLineSegment returns true if this rectangle fully contains a line segment.
-func (r Rect) ContainsLineSegment(l *LineSegment) bool {
-	return r.min[0] <= l.p1[0] && r.max[0] >= l.p2[0] &&
-		r.min[1] <= l.p1[1] && r.max[1] >= l.p2[1]
-}
-
-// IntersectsLineSegment returns true if this rectangle intersects a line segment.
-func (r Rect) IntersectsLineSegment(l *LineSegment) bool {
-	return r.min[0] < l.p2[0] && r.max[0] > l.p1[0] &&
-		r.min[1] < l.p2[1] && r.max[1] > l.p1[1]
 }
