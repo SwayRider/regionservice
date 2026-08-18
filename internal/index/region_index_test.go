@@ -525,3 +525,62 @@ func TestAdd_GeoJSONFeatureCollection(t *testing.T) {
 		t.Errorf("point inside added region: got %v, want [from-geojson]", res)
 	}
 }
+
+func TestAdd_GeoJSONMultiPolygon(t *testing.T) {
+	idx := newTestIndex()
+
+	fc := &geojson.FeatureCollection{
+		Features: []geojson.Feature{
+			{
+				Geometry: geojson.Geometry{
+					Geometry: geom.MultiPolygon{
+						{
+							{{2, 2}, {4, 2}, {4, 4}, {2, 4}},
+						},
+						{
+							{{6, 6}, {8, 6}, {8, 8}, {6, 8}},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	if err := idx.Add("from-multipolygon", fc, fc); err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
+
+	for _, p := range []orb.Point{{3, 3}, {7, 7}} {
+		res := idx.SearchByPoint(p, false)
+		if len(res) != 1 || !hasResult(res, "from-multipolygon") {
+			t.Errorf("point %v inside multi-polygon: got %v, want [from-multipolygon]", p, res)
+		}
+	}
+
+	// Point in the gap between the two polygons: inside the union bounding
+	// box but inside neither polygon, so the containment filter must reject it.
+	res := idx.SearchByPoint(orb.Point{5, 5}, false)
+	if len(res) != 0 {
+		t.Errorf("point between polygons: got %v, want none", res)
+	}
+}
+
+func TestAdd_NoPolygons(t *testing.T) {
+	idx := newTestIndex()
+
+	// A feature collection whose only geometry is not a (multi)polygon must
+	// be rejected rather than producing an empty region shape.
+	fc := &geojson.FeatureCollection{
+		Features: []geojson.Feature{
+			{
+				Geometry: geojson.Geometry{
+					Geometry: geom.Point{2, 2},
+				},
+			},
+		},
+	}
+
+	if err := idx.Add("point", fc, fc); err == nil {
+		t.Fatal("expected error for feature collection without polygons")
+	}
+}
