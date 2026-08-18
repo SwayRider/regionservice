@@ -11,7 +11,8 @@ import (
 	"github.com/paulmach/orb/planar"
 )
 
-// pointSize defines the minimum bounding box size for point queries.
+// pointSize defines the full width/height of the bounding box used for point
+// queries. The box is centered on the query point (half this size per side).
 const pointSize = 0.0001
 
 // RegionResult represents a region found by a spatial query.
@@ -70,12 +71,7 @@ func (i RegionIndex) SearchByPoint(
 	p orb.Point,
 	extended bool,
 ) (res []*RegionResult) {
-	box, err := rtreego.NewRect(
-		rtreego.Point{p[0], p[1]},
-		[]float64{pointSize, pointSize})
-	if err != nil {
-		return nil
-	}
+	box := rtreego.Point{p[0], p[1]}.ToRect(pointSize / 2)
 
 	var coreCands, extCands []rtreego.Spatial
 	coreCands = i.coreRtree.SearchIntersect(box)

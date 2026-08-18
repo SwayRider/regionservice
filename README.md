@@ -107,7 +107,7 @@ Response:
 Finds all regions containing a specific coordinate.
 
 - **Endpoint:** `POST /api/v1/region/search-point`
-- **Access:** Public
+- **Access:** User JWT **or** service client token with `region:query` scope
 
 ```bash
 curl --request POST \
@@ -138,7 +138,7 @@ Response:
 Finds all regions intersecting a bounding box.
 
 - **Endpoint:** `POST /api/v1/region/search-box`
-- **Access:** Public
+- **Access:** User JWT **or** service client token with `region:query` scope
 
 ```bash
 curl --request POST \
@@ -172,7 +172,7 @@ Response:
 Finds all regions within a radius of a coordinate.
 
 - **Endpoint:** `POST /api/v1/region/search-radius`
-- **Access:** Public
+- **Access:** User JWT **or** service client token with `region:query` scope
 
 ```bash
 curl --request POST \
@@ -205,7 +205,7 @@ Response:
 Finds border crossing points between two adjacent regions, optimized for a given travel path.
 
 - **Endpoint:** `POST /api/v1/region/find-crossing-locations`
-- **Access:** Public
+- **Access:** User JWT **or** service client token with `region:query` scope
 
 ```bash
 curl --request POST \
@@ -268,7 +268,7 @@ Advanced configuration (`advancedConfig`):
 Finds the sequence of regions to traverse between two regions.
 
 - **Endpoint:** `POST /api/v1/region/find-region-path`
-- **Access:** Public
+- **Access:** User JWT **or** service client token with `region:query` scope
 
 ```bash
 curl --request POST \
