@@ -4,19 +4,19 @@ package index
 
 import (
 	"context"
+	"math"
 	"sort"
 
 	//"github.com/dhconnelly/rtreego"
 	"github.com/paulmach/orb"
-	"github.com/paulmach/orb/planar"
 	"github.com/paulmach/orb/geo"
 	"github.com/swayrider/regionservice/internal/types"
 )
 
-// BorderCrossingResult holds a border crossing with its squared distance to a query line.
+// BorderCrossingResult holds a border crossing with its distance to a query line.
 type BorderCrossingResult struct {
-	DistanceSquared float64         // Squared distance for efficient comparison
-	BorderCrossing  *BorderCrossing // The border crossing
+	DistanceMeters float64         // Distance in meters to the query line segment
+	BorderCrossing *BorderCrossing // The border crossing
 }
 
 // ClosestBorderCrossing holds a border crossing with its actual distance to a query point.
@@ -50,10 +50,10 @@ func (i *BorderIndex) Add(
 	for _, c := range crossings {
 		bc := &BorderCrossing{
 			FromRegion: c.FromRegion,
-			ToRegion: c.ToRegion,
-			OsmId: c.OsmId,
-			RoadType: c.RoadType,
-			Location: orb.Point{c.Lon, c.Lat},
+			ToRegion:   c.ToRegion,
+			OsmId:      c.OsmId,
+			RoadType:   c.RoadType,
+			Location:   orb.Point{c.Lon, c.Lat},
 		}
 		i.regionCrossings.add(bc)
 		//i.crossingLocations.add(bc)
@@ -67,10 +67,14 @@ func (i *BorderIndex) Add(
 //   - line: Line segment (typically from start to end of route)
 //   - roadOrder: Priority order for road types (e.g., motorway first)
 //   - limit: Maximum number of crossings to return
-//   - roadTypeDelta: Distance threshold (meters) within which road type takes precedence
+//   - roadTypeDelta: Distance threshold (meters) between two crossings'
+//     distances to the line within which they are regarded as equally
+//     distant and ranked by road type priority instead of distance
 //   - dropDistance: Minimum distance (meters) between returned crossings
 //
-// Returns crossings sorted by road type priority and distance, deduplicated by dropDistance.
+// Returns crossings ranked by (distance bucket, road type priority, distance)
+// and deduplicated by dropDistance. The ranking is a strict total order, so
+// it is deterministic and independent of input order.
 func (i *BorderIndex) FindCrossingLocations(
 	ctx context.Context,
 	fromRegion, toRegion string,
@@ -100,27 +104,33 @@ func (i *BorderIndex) FindCrossingLocations(
 			continue
 		}
 
-		dSq := planar.DistanceFromSegmentSquared(line[0], line[1], cand.Location)
 		cands = append(cands, &BorderCrossingResult{
-			DistanceSquared: dSq,
+			DistanceMeters: distanceToSegmentMeters(
+				line[0], line[1], cand.Location),
 			BorderCrossing: cand,
 		})
 	}
 
+	// Rank by a strict total-order key so the result is deterministic and
+	// independent of input order: (distance bucket, road type priority,
+	// distance, osm id). Crossings in the same bucket are "equally distant
+	// from the line" and ranked by road type; crossings in different buckets
+	// are ranked purely by distance to the line.
 	sort.Slice(cands, func(i, j int) bool {
-		// If same road type, sort by distance
-		if roadFilter[cands[i].BorderCrossing.RoadType] == roadFilter[cands[j].BorderCrossing.RoadType] {
-			return cands[i].DistanceSquared < cands[j].DistanceSquared
+		bi := distanceBucket(cands[i].DistanceMeters, roadTypeDelta)
+		bj := distanceBucket(cands[j].DistanceMeters, roadTypeDelta)
+		if bi != bj {
+			return bi < bj
 		}
-
-		// If not, check is we are within the thesshold, if so sort by road type
-		distMtrs := geo.Distance(cands[i].BorderCrossing.Location, cands[j].BorderCrossing.Location)
-		if distMtrs < roadTypeDelta {
-			return roadFilter[cands[i].BorderCrossing.RoadType] < roadFilter[cands[j].BorderCrossing.RoadType]
+		pi := roadFilter[cands[i].BorderCrossing.RoadType]
+		pj := roadFilter[cands[j].BorderCrossing.RoadType]
+		if pi != pj {
+			return pi < pj
 		}
-
-		// Else sort by distance
-		return cands[i].DistanceSquared < cands[j].DistanceSquared
+		if cands[i].DistanceMeters != cands[j].DistanceMeters {
+			return cands[i].DistanceMeters < cands[j].DistanceMeters
+		}
+		return cands[i].BorderCrossing.OsmId < cands[j].BorderCrossing.OsmId
 	})
 
 	// A negative limit must never reach make's capacity argument (it would
@@ -158,6 +168,40 @@ func (i *BorderIndex) FindCrossingLocations(
 		return cands[:limit]
 	}*/
 	return list
+}
+
+// distanceBucket returns the bucket a distance-to-line falls into. Crossings
+// whose distance to the line falls in the same bucket are regarded as equally
+// distant and ranked by road type priority; crossings in different buckets are
+// ranked purely by distance. A non-positive delta disables grouping so the
+// ordering is purely by distance.
+func distanceBucket(distMeters, delta float64) float64 {
+	if delta <= 0 {
+		return distMeters
+	}
+	return math.Floor(distMeters / delta)
+}
+
+// distanceToSegmentMeters returns the great-circle distance in meters from
+// point to the line segment [a, b]. The point is projected onto the segment
+// in planar space and the haversine distance to that foot point is returned.
+// The projection is exact for the short, sub-degree segments used for
+// border-crossing search.
+func distanceToSegmentMeters(a, b, p orb.Point) float64 {
+	return geo.Distance(closestPointOnSegment(a, b, p), p)
+}
+
+// closestPointOnSegment returns the point on segment [a, b] closest to p,
+// using a planar projection parameter clamped to [0, 1].
+func closestPointOnSegment(a, b, p orb.Point) orb.Point {
+	abx, aby := b[0]-a[0], b[1]-a[1]
+	l2 := abx*abx + aby*aby
+	if l2 == 0 {
+		return a
+	}
+	t := ((p[0]-a[0])*abx + (p[1]-a[1])*aby) / l2
+	t = math.Max(0, math.Min(1, t))
+	return orb.Point{a[0] + t*abx, a[1] + t*aby}
 }
 
 // FindClosestCrossing finds the nearest border crossing to a point.
@@ -199,14 +243,13 @@ func (i *BorderIndex) FindClosestCrossing(
 		dist := geo.Distance(location, bc.Location)
 		if crossing == nil || dist < crossing.Distance {
 			crossing = &ClosestBorderCrossing{
-				Distance: dist,
+				Distance:       dist,
 				BorderCrossing: bc,
 			}
 		}
 	}
 	return crossing
 }
-
 
 // FindRegionPath finds a path of regions from source to destination.
 // Uses breadth-first search through the border crossing graph.
@@ -270,7 +313,6 @@ func (i *BorderIndex) FindRegionPath(
 	}
 	return nil
 }
-
 
 const maxPathLengthMultiplier = 2
 
@@ -423,4 +465,3 @@ func (rc *RegionCrossings) add(bc *BorderCrossing) {
 	}
 	tree.Insert(NewSpatialBorderCrossing(bc))
 }*/
-

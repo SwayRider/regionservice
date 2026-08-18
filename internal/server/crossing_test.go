@@ -6,10 +6,10 @@ import (
 	"testing"
 
 	"github.com/paulmach/orb"
+	"github.com/swayrider/protos/common_types/geo"
+	regionv1 "github.com/swayrider/protos/region/v1"
 	"github.com/swayrider/regionservice/internal/index"
 	"github.com/swayrider/regionservice/internal/types"
-	regionv1 "github.com/swayrider/protos/region/v1"
-	"github.com/swayrider/protos/common_types/geo"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -35,8 +35,8 @@ func TestFindCrossingLocations_Validation(t *testing.T) {
 	s := newTestRegionServer(&mockRegionQuerier{}, &mockBorderQuerier{})
 
 	tests := []struct {
-		name    string
-		mutate  func(*regionv1.FindCrossingLocationsRequest)
+		name   string
+		mutate func(*regionv1.FindCrossingLocationsRequest)
 	}{
 		{"missing FromRegion", func(r *regionv1.FindCrossingLocationsRequest) { r.FromRegion = "" }},
 		{"missing ToRegion", func(r *regionv1.FindCrossingLocationsRequest) { r.ToRegion = "" }},
@@ -163,11 +163,48 @@ func TestFindCrossingLocations_AdvancedConfig_NoForwardCrossing(t *testing.T) {
 	}
 }
 
+func TestFindCrossingLocations_AdvancedConfig_NoFallbackDefinition(t *testing.T) {
+	// Reference distance (300m) exceeds every non-zero definition and there is
+	// no 0-max fallback entry → findCrossingDefinition returns nil → NotFound.
+	bq := &mockBorderQuerier{
+		findClosestCrossingFn: func(_ context.Context, _, _ string, _ orb.Point, _ []string) *index.ClosestBorderCrossing {
+			return &index.ClosestBorderCrossing{
+				Distance: 300,
+				BorderCrossing: &index.BorderCrossing{
+					FromRegion: "A",
+					ToRegion:   "B",
+					Location:   orb.Point{1, 1},
+				},
+			}
+		},
+	}
+	s := newTestRegionServer(&mockRegionQuerier{}, bq)
+
+	_, err := s.FindCrossingLocations(context.Background(), &regionv1.FindCrossingLocationsRequest{
+		FromRegion:   "A",
+		ToRegion:     "B",
+		FromLocation: &geo.Coordinate{Lon: 0, Lat: 0},
+		ToLocation:   &geo.Coordinate{Lon: 1, Lat: 1},
+		ConfigOneof: &regionv1.FindCrossingLocationsRequest_AdvancedConfig{
+			AdvancedConfig: &regionv1.BorderCrossingAdvancedConfig{
+				Definitions: []*regionv1.BorderCrossingDefinition{
+					{MaxBorderDistance: 50},
+					{MaxBorderDistance: 100},
+				},
+			},
+		},
+	})
+	if code := status.Code(err); code != codes.NotFound {
+		t.Errorf("code = %v, want %v", code, codes.NotFound)
+	}
+}
+
 // =============================================================================
 // findCrossingDefinition Tests
 // =============================================================================
 
 func TestFindCrossingDefinition(t *testing.T) {
+	def0 := &regionv1.BorderCrossingDefinition{MaxBorderDistance: 0}
 	def50 := &regionv1.BorderCrossingDefinition{MaxBorderDistance: 50}
 	def100 := &regionv1.BorderCrossingDefinition{MaxBorderDistance: 100}
 	def200 := &regionv1.BorderCrossingDefinition{MaxBorderDistance: 200}
@@ -176,26 +213,48 @@ func TestFindCrossingDefinition(t *testing.T) {
 		name        string
 		refDistance float64
 		defs        []*regionv1.BorderCrossingDefinition
-		wantMax     float64
+		want        *regionv1.BorderCrossingDefinition // nil means no definition
 	}{
-		// After sorting: [50, 100, 200]. Loop starts at i=1.
-		// refDistance=60: 60 <= 100 → return definitions[1] (max=100)
-		{"within second definition", 60, []*regionv1.BorderCrossingDefinition{def50, def100, def200}, 100},
-		// refDistance=150: 150 > 100, 150 <= 200 → return definitions[2] (max=200)
-		{"within third definition", 150, []*regionv1.BorderCrossingDefinition{def50, def100, def200}, 200},
-		// refDistance=300: exceeds all in loop → fallback definitions[0] (max=50)
-		{"exceeds all, fallback", 300, []*regionv1.BorderCrossingDefinition{def50, def100, def200}, 50},
-		// Single definition: loop [1..0] never runs → always definitions[0]
-		{"single definition", 99999, []*regionv1.BorderCrossingDefinition{def100}, 100},
+		{"smallest covering band", 30, []*regionv1.BorderCrossingDefinition{def50, def100, def200}, def50},
+		{"exactly at band boundary", 50, []*regionv1.BorderCrossingDefinition{def50, def100, def200}, def50},
+		{"within second band", 60, []*regionv1.BorderCrossingDefinition{def50, def100, def200}, def100},
+		{"within third band", 150, []*regionv1.BorderCrossingDefinition{def50, def100, def200}, def200},
+		{"exceeds all without fallback", 300, []*regionv1.BorderCrossingDefinition{def50, def100, def200}, nil},
+		{"exceeds all with fallback", 300, []*regionv1.BorderCrossingDefinition{def0, def50, def100, def200}, def0},
+		{"unsorted input", 60, []*regionv1.BorderCrossingDefinition{def200, def50, def100}, def100},
+		{"unsorted input with fallback", 300, []*regionv1.BorderCrossingDefinition{def100, def0, def200, def50}, def0},
+		{"single definition within max", 50, []*regionv1.BorderCrossingDefinition{def100}, def100},
+		{"single definition exceeds max", 99999, []*regionv1.BorderCrossingDefinition{def100}, nil},
+		{"empty definitions", 60, nil, nil},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := findCrossingDefinition(tt.refDistance, tt.defs)
-			if got.MaxBorderDistance != tt.wantMax {
-				t.Errorf("MaxBorderDistance = %v, want %v", got.MaxBorderDistance, tt.wantMax)
+			if got != tt.want {
+				t.Errorf("got %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestFindCrossingDefinition_DoesNotMutateInput(t *testing.T) {
+	defs := []*regionv1.BorderCrossingDefinition{
+		{MaxBorderDistance: 200},
+		{MaxBorderDistance: 0},
+		{MaxBorderDistance: 100},
+		{MaxBorderDistance: 50},
+	}
+	before := append([]*regionv1.BorderCrossingDefinition(nil), defs...)
+
+	got := findCrossingDefinition(60, defs)
+	if got == nil || got.MaxBorderDistance != 100 {
+		t.Errorf("MaxBorderDistance = %v, want 100", got)
+	}
+	for i := range defs {
+		if defs[i] != before[i] {
+			t.Fatalf("input slice mutated at index %d", i)
+		}
 	}
 }
 
@@ -248,6 +307,7 @@ func TestFindCrossingLocations_AdvancedConfig_NegativeLimitDefaults(t *testing.T
 	req.ConfigOneof = &regionv1.FindCrossingLocationsRequest_AdvancedConfig{
 		AdvancedConfig: &regionv1.BorderCrossingAdvancedConfig{
 			Definitions: []*regionv1.BorderCrossingDefinition{
+				{MaxBorderDistance: 0, RoadTypeOrder: []regionv1.RoadType{regionv1.RoadType_MOTORWAY}},
 				{MaxBorderDistance: 50, RoadTypeOrder: []regionv1.RoadType{regionv1.RoadType_MOTORWAY}},
 			},
 		},

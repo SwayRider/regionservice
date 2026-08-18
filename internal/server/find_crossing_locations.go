@@ -8,12 +8,12 @@ import (
 	"strings"
 
 	"github.com/paulmach/orb"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 	"github.com/swayrider/protos/common_types/geo"
 	regionv1 "github.com/swayrider/protos/region/v1"
 	"github.com/swayrider/regionservice/internal/index"
 	log "github.com/swayrider/swlib/logger"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // FindCrossingLocations finds border crossings between two regions.
@@ -115,19 +115,19 @@ func (s *RegionServer) findCrossingLocationsSimple(
 		req.FromRegion, req.ToRegion,
 		line, roadTypeOrder, int(limit),
 		cfg.RoadTypeDelta, cfg.DropDistance)
-	
+
 	resp := &regionv1.FindCrossingLocationsResponse{
 		Crossings: make([]*regionv1.BorderCrossing, 0, len(res)),
 	}
 	for _, item := range res {
 		resp.Crossings = append(resp.Crossings, &regionv1.BorderCrossing{
 			FromRegion: item.BorderCrossing.FromRegion,
-			ToRegion: item.BorderCrossing.ToRegion,
+			ToRegion:   item.BorderCrossing.ToRegion,
 			RoadType: regionv1.RoadType(
 				regionv1.RoadType_value[strings.ToUpper(
 					item.BorderCrossing.RoadType.String())]),
 			OsmId: int64(item.BorderCrossing.OsmId),
-			Location: &geo.Coordinate {
+			Location: &geo.Coordinate{
 				Lon: item.BorderCrossing.Location.X(),
 				Lat: item.BorderCrossing.Location.Y(),
 			},
@@ -182,19 +182,19 @@ func (s *RegionServer) findCrossingLocationsAdvanced(
 		req.FromRegion, req.ToRegion,
 		line, roadTypeOrder, int(limit),
 		cfgDef.RoadTypeDelta, cfgDef.DropDistance)
-	
+
 	resp := &regionv1.FindCrossingLocationsResponse{
 		Crossings: make([]*regionv1.BorderCrossing, 0, len(res)),
 	}
 	for _, item := range res {
 		resp.Crossings = append(resp.Crossings, &regionv1.BorderCrossing{
 			FromRegion: item.BorderCrossing.FromRegion,
-			ToRegion: item.BorderCrossing.ToRegion,
+			ToRegion:   item.BorderCrossing.ToRegion,
 			RoadType: regionv1.RoadType(
 				regionv1.RoadType_value[strings.ToUpper(
 					item.BorderCrossing.RoadType.String())]),
 			OsmId: int64(item.BorderCrossing.OsmId),
-			Location: &geo.Coordinate {
+			Location: &geo.Coordinate{
 				Lon: item.BorderCrossing.Location.X(),
 				Lat: item.BorderCrossing.Location.Y(),
 			},
@@ -211,41 +211,66 @@ func closestCrossing(
 	fromRegion, toRegion string,
 	line orb.LineString,
 ) (*index.ClosestBorderCrossing, error) {
-	closesForwardCrossing := borderIndex.FindClosestCrossing(
+	closestForwardCrossing := borderIndex.FindClosestCrossing(
 		ctx, fromRegion, toRegion, line[0], nil)
-	if closesForwardCrossing == nil {
+	if closestForwardCrossing == nil {
 		return nil, status.Error(
 			codes.NotFound, "No forward crossing found")
 	}
-	closesBackwardCrossing := borderIndex.FindClosestCrossing(
+	closestBackwardCrossing := borderIndex.FindClosestCrossing(
 		ctx, fromRegion, toRegion, line[1], nil)
-	if closesBackwardCrossing == nil {
+	if closestBackwardCrossing == nil {
 		return nil, status.Error(
 			codes.NotFound, "No backward crossing found")
 	}
 
-	if closesForwardCrossing.Distance < closesBackwardCrossing.Distance {
-		return closesForwardCrossing, nil
+	if closestForwardCrossing.Distance < closestBackwardCrossing.Distance {
+		return closestForwardCrossing, nil
 	}
-	return closesBackwardCrossing, nil
+	return closestBackwardCrossing, nil
 }
 
-// findCrossingDefinition selects the appropriate crossing definition based on distance.
-// Definitions are sorted by MaxBorderDistance and the first matching definition is returned.
+// findCrossingDefinition selects the crossing definition that applies at the
+// given reference distance. Definitions are ranked by MaxBorderDistance; a
+// definition applies when the reference distance is at or below its
+// MaxBorderDistance. A definition with MaxBorderDistance == 0 is the explicit
+// fallback for distances beyond every non-zero definition (see the proto
+// comment); when no such fallback is present and the distance exceeds all
+// non-zero definitions, nil is returned so the caller can report NotFound.
+//
+// The input slice is not mutated: it is cloned before sorting.
 func findCrossingDefinition(
 	refDistance float64,
 	definitions []*regionv1.BorderCrossingDefinition,
 ) *regionv1.BorderCrossingDefinition {
-	slices.SortFunc(
-		definitions, func(a, b *regionv1.BorderCrossingDefinition) int {
-			return int(a.MaxBorderDistance - b.MaxBorderDistance)
-		})
+	defs := slices.Clone(definitions)
+	slices.SortFunc(defs, func(a, b *regionv1.BorderCrossingDefinition) int {
+		switch {
+		case a.MaxBorderDistance < b.MaxBorderDistance:
+			return -1
+		case a.MaxBorderDistance > b.MaxBorderDistance:
+			return 1
+		default:
+			return 0
+		}
+	})
 
-	for i := 1; i < len(definitions); i++ {
-		if refDistance <= definitions[i].MaxBorderDistance {
-			return definitions[i]
+	// First non-zero definition whose max covers the reference distance.
+	for _, d := range defs {
+		if d.MaxBorderDistance == 0 {
+			continue // 0 marks the fallback, never a band selection.
+		}
+		if refDistance <= d.MaxBorderDistance {
+			return d
 		}
 	}
-	return definitions[0]
 
+	// Distance exceeds every non-zero definition: use the explicit 0-max
+	// fallback when present, otherwise nil (caller reports NotFound).
+	for _, d := range defs {
+		if d.MaxBorderDistance == 0 {
+			return d
+		}
+	}
+	return nil
 }

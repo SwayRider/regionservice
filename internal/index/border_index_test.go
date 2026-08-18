@@ -293,3 +293,98 @@ func TestFindClosestCrossing_RoadTypeFilter(t *testing.T) {
 		t.Errorf("expected OsmId 2 (MOTORWAY crossing), got %d", res.BorderCrossing.OsmId)
 	}
 }
+
+// =============================================================================
+// FindCrossingLocations Ranking Tests (point 6)
+// =============================================================================
+
+// assertOsmIds verifies the OsmId order of a result list.
+func assertOsmIds(t *testing.T, res []*BorderCrossingResult, want []int) {
+	t.Helper()
+	if len(res) != len(want) {
+		t.Fatalf("got %d results, want %d", len(res), len(want))
+	}
+	for i, r := range res {
+		if r.BorderCrossing.OsmId != want[i] {
+			t.Errorf("result[%d] OsmId = %d, want %d", i, r.BorderCrossing.OsmId, want[i])
+		}
+	}
+}
+
+func TestFindCrossingLocations_SameRoadTypeSortedByDistance(t *testing.T) {
+	// Both PRIMARY, at ~111m and ~222m from the line; nearer must sort first
+	// regardless of insertion order.
+	idx := newTestBorderIndex(types.BorderCrossingCollection{
+		{FromRegion: "A", ToRegion: "B", RoadType: types.PRIMARY, Lon: 5, Lat: 0.002, OsmId: 2},
+		{FromRegion: "A", ToRegion: "B", RoadType: types.PRIMARY, Lon: 5, Lat: 0.001, OsmId: 1},
+	})
+	line := orb.LineString{orb.Point{0, 0}, orb.Point{10, 0}}
+	res := idx.FindCrossingLocations(
+		context.Background(), "A", "B",
+		line, []string{"PRIMARY"}, 10, 1000, 1,
+	)
+	assertOsmIds(t, res, []int{1, 2})
+}
+
+func TestFindCrossingLocations_RoadTypePrecedenceWithinDelta(t *testing.T) {
+	// MOTORWAY (~167m) and SECONDARY (~111m) are in the same bucket, so road
+	// type decides: the farther MOTORWAY must rank before the nearer SECONDARY.
+	idx := newTestBorderIndex(types.BorderCrossingCollection{
+		{FromRegion: "A", ToRegion: "B", RoadType: types.SECONDARY, Lon: 5, Lat: 0.001, OsmId: 2},
+		{FromRegion: "A", ToRegion: "B", RoadType: types.MOTORWAY, Lon: 5, Lat: 0.0015, OsmId: 1},
+	})
+	line := orb.LineString{orb.Point{0, 0}, orb.Point{10, 0}}
+	res := idx.FindCrossingLocations(
+		context.Background(), "A", "B",
+		line, []string{"MOTORWAY", "SECONDARY"}, 10, 1000, 1,
+	)
+	assertOsmIds(t, res, []int{1, 2})
+}
+
+func TestFindCrossingLocations_DistanceBeatsRoadTypeBeyondDelta(t *testing.T) {
+	// delta=100m: SECONDARY at ~11m (bucket 0) vs MOTORWAY at ~111m (bucket 1).
+	// The much nearer SECONDARY must rank first despite lower road priority.
+	idx := newTestBorderIndex(types.BorderCrossingCollection{
+		{FromRegion: "A", ToRegion: "B", RoadType: types.MOTORWAY, Lon: 5, Lat: 0.001, OsmId: 1},
+		{FromRegion: "A", ToRegion: "B", RoadType: types.SECONDARY, Lon: 5, Lat: 0.0001, OsmId: 2},
+	})
+	line := orb.LineString{orb.Point{0, 0}, orb.Point{10, 0}}
+	res := idx.FindCrossingLocations(
+		context.Background(), "A", "B",
+		line, []string{"MOTORWAY", "SECONDARY"}, 10, 100, 1,
+	)
+	assertOsmIds(t, res, []int{2, 1})
+}
+
+func TestFindCrossingLocations_DeterministicOrdering(t *testing.T) {
+	// Three crossings form a cycle under the old pairwise comparator:
+	//   A(MOTORWAY,~111m) vs B(PRIMARY,~222m): within delta -> road type A<B
+	//   B vs C(SECONDARY,~55m):              within delta -> road type B<C
+	//   A vs C:                              beyond delta -> distance C<A
+	// i.e. A<B<C<A, so sort.Slice order depended on input order. The total
+	// order key must yield the same ranking for forward and reversed input.
+	crossings := types.BorderCrossingCollection{
+		{FromRegion: "A", ToRegion: "B", RoadType: types.SECONDARY, Lon: 0.04, Lat: 0.0005, OsmId: 3},
+		{FromRegion: "A", ToRegion: "B", RoadType: types.MOTORWAY, Lon: 0.06, Lat: 0.001, OsmId: 1},
+		{FromRegion: "A", ToRegion: "B", RoadType: types.PRIMARY, Lon: 0.05, Lat: 0.002, OsmId: 2},
+	}
+	line := orb.LineString{orb.Point{0, 0}, orb.Point{0.1, 0}}
+	roadOrder := []string{"MOTORWAY", "PRIMARY", "SECONDARY"}
+
+	// All three fall in the same 2000m bucket, so road priority decides.
+	want := []int{1, 2, 3}
+
+	forward := newTestBorderIndex(crossings)
+	res := forward.FindCrossingLocations(
+		context.Background(), "A", "B", line, roadOrder, 10, 2000, 1)
+	assertOsmIds(t, res, want)
+
+	reversed := make(types.BorderCrossingCollection, len(crossings))
+	for i := range crossings {
+		reversed[len(crossings)-1-i] = crossings[i]
+	}
+	backward := newTestBorderIndex(reversed)
+	res = backward.FindCrossingLocations(
+		context.Background(), "A", "B", line, roadOrder, 10, 2000, 1)
+	assertOsmIds(t, res, want)
+}
