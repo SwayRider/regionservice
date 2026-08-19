@@ -54,40 +54,6 @@ func TestBoxLocation_HasPoint(t *testing.T) {
 }
 
 // =============================================================================
-// BoxLocation.TransformPoint Tests
-// =============================================================================
-
-func TestBoxLocation_TransformPoint(t *testing.T) {
-	tests := []struct {
-		name     string
-		location BoxLocation
-		pt       orb.Point
-		wantLon  float64
-	}{
-		{"NE: point already in quadrant", NE, orb.Point{10, 10}, 10},
-		{"NE: negative lon shifted +360", NE, orb.Point{-10, 10}, 350},
-		{"NW: point already in quadrant", NW, orb.Point{-10, 10}, -10},
-		{"NW: positive lon shifted -360", NW, orb.Point{10, 10}, -350},
-		{"SE: point already in quadrant", SE, orb.Point{10, -10}, 10},
-		{"SE: negative lon shifted +360", SE, orb.Point{-10, -10}, 350},
-		{"SW: point already in quadrant", SW, orb.Point{-10, -10}, -10},
-		{"SW: positive lon shifted -360", SW, orb.Point{10, -10}, -350},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := tt.location.TransformPoint(tt.pt)
-			if got[0] != tt.wantLon {
-				t.Errorf("TransformPoint(%v).X = %v, want %v", tt.pt, got[0], tt.wantLon)
-			}
-			if got[1] != tt.pt[1] {
-				t.Errorf("TransformPoint(%v).Y changed: got %v, want %v", tt.pt, got[1], tt.pt[1])
-			}
-		})
-	}
-}
-
-// =============================================================================
 // Box Tests
 // =============================================================================
 
@@ -95,6 +61,30 @@ func TestBox_Size_Empty(t *testing.T) {
 	b := NewBox(NE)
 	if got := b.Size(); got != 0 {
 		t.Errorf("empty box Size() = %v, want 0", got)
+	}
+}
+
+func TestBox_IsEmpty(t *testing.T) {
+	if !NewBox(NE).IsEmpty() {
+		t.Error("new box must be empty")
+	}
+	b := NewBox(NE)
+	b.Add(orb.Point{10, 20})
+	if b.IsEmpty() {
+		t.Error("box with a point must not be empty")
+	}
+}
+
+func TestBox_IsEmpty_Degenerate(t *testing.T) {
+	// Points sharing one coordinate give a zero-area box: not empty.
+	b := NewBox(NE)
+	b.Add(orb.Point{10, 20})
+	b.Add(orb.Point{10, 30})
+	if b.IsEmpty() {
+		t.Error("degenerate (zero-area) box must not be empty")
+	}
+	if got := b.Size(); got != 0 {
+		t.Errorf("degenerate box Size() = %v, want 0", got)
 	}
 }
 
@@ -117,7 +107,7 @@ func TestBox_Add_And_Size(t *testing.T) {
 }
 
 func TestBox_Add_IgnoresOutOfQuadrant(t *testing.T) {
-	b := NewBox(NE) // NE: lon >= 0, lat >= 0
+	b := NewBox(NE)           // NE: lon >= 0, lat >= 0
 	b.Add(orb.Point{-10, 10}) // negative lon → ignored
 	if got := b.Size(); got != 0 {
 		t.Errorf("box should be empty after out-of-quadrant point, Size() = %v", got)
@@ -172,47 +162,34 @@ func TestBounds_Extend_EmptyOther(t *testing.T) {
 	}
 }
 
-// =============================================================================
-// Rect Tests
-// =============================================================================
+func TestBounds_Extend_Degenerate(t *testing.T) {
+	// A single point in a quadrant yields a degenerate box; it must still
+	// propagate on Extend so axis-aligned geometries stay queryable.
+	b1 := NewBounds()
+	b2 := NewBounds()
+	b2.Add(orb.Point{10, 20})
 
-func TestRect_Contains(t *testing.T) {
-	outer := NewRect(orb.Point{0, 0}, orb.Point{10, 10})
-	inner := NewRect(orb.Point{2, 2}, orb.Point{8, 8})
-	partial := NewRect(orb.Point{5, 5}, orb.Point{15, 15})
+	b1.Extend(b2)
+	if b1.NE.IsEmpty() {
+		t.Error("degenerate quadrant box must propagate on Extend")
+	}
+	if got := b1.NE.Size(); got != 0 {
+		t.Errorf("single-point box Size() = %v, want 0", got)
+	}
 
-	if !outer.Contains(inner) {
-		t.Error("outer should contain inner")
+	// Degenerate line boxes propagate too.
+	b3 := NewBounds()
+	b3.Add(orb.Point{30, 40})
+	b3.Add(orb.Point{30, 50})
+	b1.Extend(b3)
+	if b1.NE.IsEmpty() {
+		t.Error("degenerate line box must propagate on Extend")
 	}
-	if outer.Contains(partial) {
-		t.Error("outer should not contain partial overlap")
+	bounds := b1.NE.Bounds()
+	if bounds.Min.X() != 10 || bounds.Max.X() != 30 {
+		t.Errorf("NE lon extent = %v..%v, want [10, 30]", bounds.Min.X(), bounds.Max.X())
 	}
-	if inner.Contains(outer) {
-		t.Error("inner should not contain outer")
-	}
-}
-
-func TestRect_Within(t *testing.T) {
-	outer := NewRect(orb.Point{0, 0}, orb.Point{10, 10})
-	inner := NewRect(orb.Point{2, 2}, orb.Point{8, 8})
-
-	if !inner.Within(outer) {
-		t.Error("inner should be within outer")
-	}
-	if outer.Within(inner) {
-		t.Error("outer should not be within inner")
-	}
-}
-
-func TestRect_Intersects(t *testing.T) {
-	r1 := NewRect(orb.Point{0, 0}, orb.Point{5, 5})
-	r2 := NewRect(orb.Point{3, 3}, orb.Point{8, 8})   // overlaps
-	r3 := NewRect(orb.Point{6, 6}, orb.Point{10, 10}) // no overlap
-
-	if !r1.Intersects(r2) {
-		t.Error("r1 and r2 should intersect")
-	}
-	if r1.Intersects(r3) {
-		t.Error("r1 and r3 should not intersect")
+	if bounds.Min.Y() != 20 || bounds.Max.Y() != 50 {
+		t.Errorf("NE lat extent = %v..%v, want [20, 50]", bounds.Min.Y(), bounds.Max.Y())
 	}
 }

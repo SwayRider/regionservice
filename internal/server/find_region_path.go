@@ -5,10 +5,10 @@ package server
 import (
 	"context"
 
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 	regionv1 "github.com/swayrider/protos/region/v1"
 	log "github.com/swayrider/swlib/logger"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // FindRegionPath finds a path of regions from source to destination.
@@ -42,7 +42,10 @@ func (s *RegionServer) FindRegionPath(
 		)
 	}
 
-	res := s.BorderIndex().FindRegionPath(ctx, req.FromRegion, req.ToRegion)
+	res, err := s.BorderIndex().FindRegionPath(ctx, req.FromRegion, req.ToRegion)
+	if err != nil {
+		return nil, err
+	}
 	if res == nil {
 		lg.Infoln("No regions found")
 		return &regionv1.FindRegionPathResponse{}, nil

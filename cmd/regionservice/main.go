@@ -22,7 +22,8 @@
 //
 // # Endpoints
 //
-// All endpoints are public (no authentication required):
+// All RegionService endpoints require a user JWT or a service client token with
+// the "region:query" scope. The health Ping endpoint is public:
 //   - SearchPoint: Find regions containing a coordinate
 //   - SearchBox: Find regions intersecting a bounding box
 //   - SearchRadius: Find regions within a radius of a point
@@ -34,7 +35,8 @@ import (
 	"context"
 
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
-	"google.golang.org/grpc"
+	"github.com/swayrider/grpcclients"
+	"github.com/swayrider/grpcclients/authclient"
 	healthv1 "github.com/swayrider/protos/health/v1"
 	regionv1 "github.com/swayrider/protos/region/v1"
 	"github.com/swayrider/regionservice/internal/bootstrap"
@@ -42,7 +44,9 @@ import (
 	"github.com/swayrider/regionservice/internal/index"
 	"github.com/swayrider/regionservice/internal/server"
 	"github.com/swayrider/swlib/app"
+	"github.com/swayrider/swlib/jwtkeys"
 	log "github.com/swayrider/swlib/logger"
+	"google.golang.org/grpc"
 )
 
 // Configuration field constants.
@@ -57,15 +61,39 @@ func main() {
 
 	application := app.New("regionservice").
 		WithDefaultConfigFields(app.BackendServiceFields, app.FlagGroupOverrides{}).
+		WithServiceClients(
+			app.NewServiceClient("authservice", authServiceClientCtor),
+		).
 		WithConfigFields(
 			app.NewStringConfigField(FldGeoDataDir, EnvGeoDataDir, "Root directory containing geodata", ""),
 		).
+		WithConfigFields(app.RateLimitConfigFields()...).
+		WithConfigFields(app.JWTKeysConfigFields()...).
 		WithAppData("RegionIndex", ri).
-		WithAppData("BorderIndex", bi).
-		WithInitializers(bootstrapFn)
+		WithAppData("BorderIndex", bi)
 
-	grpcConfig := app.NewGrpcConfig(
-		app.NoInterceptor, nil,
+	jwtKeyCache := jwtkeys.New(application.Logger())
+
+	grpcConfig := newGrpcConfig(application, jwtKeyCache)
+
+	application = application.
+		WithBackgroundRoutines(
+			app.JWTKeysFetcher(jwtKeyCache),
+			app.RateLimitEvictor(grpcConfig),
+		).
+		WithInitializers(bootstrapFn, app.JWTKeysInitializer(jwtKeyCache), app.RateLimiterInitializer(grpcConfig)).
+		WithGrpc(grpcConfig)
+	application.Run()
+}
+
+// newGrpcConfig builds the gRPC server config with JWT authentication enabled.
+// Every RegionService endpoint (declared in internal/server/server.go) requires
+// a valid user JWT or a service client token with the "region:query" scope;
+// only the health Ping endpoint is public.
+func newGrpcConfig(application app.App, jwtKeyCache *jwtkeys.Cache) *app.GrpcConfig {
+	return app.NewGrpcConfig(
+		app.AuthInterceptor|app.RateLimitInterceptor,
+		jwtKeyCache.GetPublicKeys,
 		app.GrpcServiceHooks{
 			ServiceRegistrar:   grpcRegionRegistrar,
 			ServiceHTTPHandler: grpcRegionGateway(application),
@@ -75,8 +103,18 @@ func main() {
 			ServiceHTTPHandler: grpcHealthGateway(application),
 		},
 	)
-	application = application.WithGrpc(grpcConfig)
-	application.Run()
+}
+
+// authServiceClientCtor creates a new auth service gRPC client.
+// This client is used to fetch JWT public keys for token verification.
+func authServiceClientCtor(a app.App) grpcclients.Client {
+	lg := a.Logger().Derive(log.WithFunction("authServiceClientCtor"))
+	clnt, err := authclient.New(
+		app.ServiceClientHostAndPort(a, "authservice"))
+	if err != nil {
+		lg.Fatalf("failed to create authservice client: %v", err)
+	}
+	return clnt
 }
 
 // bootstrapFn loads geodata from the filesystem and builds the spatial indices.
@@ -89,11 +127,11 @@ func bootstrapFn(a app.App) error {
 	ri := app.GetAppData[*index.RegionIndex](a, "RegionIndex")
 	bi := app.GetAppData[*index.BorderIndex](a, "BorderIndex")
 
-	err := bootstrap.Bootstrap(reader, ri, bi)
-	if err != nil {
+	if err := bootstrap.Bootstrap(reader, ri, bi); err != nil {
+		// Fatalf exits the process; bootstrap failure is unrecoverable.
 		lg.Fatalf("failed to bootstrap: %v", err)
 	}
-	return err
+	return nil
 }
 
 // grpcRegionRegistrar registers the RegionService gRPC server with the registrar.

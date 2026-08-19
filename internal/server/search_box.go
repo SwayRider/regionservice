@@ -4,8 +4,7 @@ package server
 
 import (
 	"context"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
+
 	"github.com/paulmach/orb"
 	regionv1 "github.com/swayrider/protos/region/v1"
 	log "github.com/swayrider/swlib/logger"
@@ -28,24 +27,8 @@ func (s *RegionServer) SearchBox(
 ) (*regionv1.SearchBoxResponse, error) {
 	lg := s.Logger().Derive(log.WithFunction("SearchBox"))
 
-	if req.Box == nil {
-		lg.Debugln("Box must be set")
-		return nil, status.Error(
-			codes.InvalidArgument, "Box must be set",
-		)
-	}
-
-	if req.Box.BottomLeft == nil {
-		lg.Debugln("TopLeft must be set")
-		return nil, status.Error(
-			codes.InvalidArgument, "TopLeft must be set",
-		)
-	}
-	if req.Box.TopRight == nil {
-		lg.Debugln("BottomRight must be set")
-		return nil, status.Error(
-			codes.InvalidArgument, "BottomRight must be set",
-		)
+	if err := validateBox(req.Box); err != nil {
+		return nil, err
 	}
 
 	res := s.RegionIndex().SearchByBox(

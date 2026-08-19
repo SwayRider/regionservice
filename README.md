@@ -13,7 +13,7 @@ The regionservice exposes two server interfaces:
 
 ### Dependencies
 
-None beyond the geodata volume mount.
+- **authservice** — JWT public keys for verifying incoming tokens (fetched periodically and cached).
 
 ### Data Loading
 
@@ -32,11 +32,13 @@ The service maintains two in-memory spatial indexes:
 | gRPC endpoint | Access |
 |---|---|
 | `/health.v1.HealthService/Ping` | Public — no token required |
+| `/health.v1.HealthService/Check` | Public — no token required |
 | `/region.v1.RegionService/SearchPoint` | User JWT **or** service client token with `region:query` scope |
 | `/region.v1.RegionService/SearchBox` | User JWT **or** service client token with `region:query` scope |
 | `/region.v1.RegionService/SearchRadius` | User JWT **or** service client token with `region:query` scope |
 | `/region.v1.RegionService/FindCrossingLocations` | User JWT **or** service client token with `region:query` scope |
 | `/region.v1.RegionService/FindRegionPath` | User JWT **or** service client token with `region:query` scope |
+| `/region.v1.RegionService/FindRouteRegionPaths` | User JWT **or** service client token with `region:query` scope |
 
 Service clients (e.g. swayrider-api) must obtain a token from authservice using their `clientId` and `clientSecret`, then pass it as `Authorization: Bearer <token>` in the gRPC call metadata.
 
@@ -53,6 +55,8 @@ Configuration is provided via environment variables or CLI flags.
 | `HTTP_PORT` | `-http-port` | 8080 | REST API port |
 | `GRPC_PORT` | `-grpc-port` | 8081 | gRPC port |
 | `LOG_LEVEL` | `-log-level` | info | Log verbosity level |
+| `AUTHSERVICE_HOST` | `-authservice-host` | | authservice host for JWT public key fetching |
+| `AUTHSERVICE_PORT` | `-authservice-port` | | authservice gRPC port for JWT public key fetching |
 
 ### Geodata Configuration
 
@@ -64,7 +68,7 @@ Configuration is provided via environment variables or CLI flags.
 
 The API is defined in the Protocol Buffer files at `protos/region/v1/` and `protos/health/v1/`.
 
-All endpoints are public and require no authentication.
+Access to each endpoint follows the Authorization table above.
 
 ---
 
@@ -103,7 +107,7 @@ Response:
 Finds all regions containing a specific coordinate.
 
 - **Endpoint:** `POST /api/v1/region/search-point`
-- **Access:** Public
+- **Access:** User JWT **or** service client token with `region:query` scope
 
 ```bash
 curl --request POST \
@@ -134,7 +138,7 @@ Response:
 Finds all regions intersecting a bounding box.
 
 - **Endpoint:** `POST /api/v1/region/search-box`
-- **Access:** Public
+- **Access:** User JWT **or** service client token with `region:query` scope
 
 ```bash
 curl --request POST \
@@ -168,7 +172,7 @@ Response:
 Finds all regions within a radius of a coordinate.
 
 - **Endpoint:** `POST /api/v1/region/search-radius`
-- **Access:** Public
+- **Access:** User JWT **or** service client token with `region:query` scope
 
 ```bash
 curl --request POST \
@@ -201,7 +205,7 @@ Response:
 Finds border crossing points between two adjacent regions, optimized for a given travel path.
 
 - **Endpoint:** `POST /api/v1/region/find-crossing-locations`
-- **Access:** Public
+- **Access:** User JWT **or** service client token with `region:query` scope
 
 ```bash
 curl --request POST \
@@ -264,7 +268,7 @@ Advanced configuration (`advancedConfig`):
 Finds the sequence of regions to traverse between two regions.
 
 - **Endpoint:** `POST /api/v1/region/find-region-path`
-- **Access:** Public
+- **Access:** User JWT **or** service client token with `region:query` scope
 
 ```bash
 curl --request POST \
@@ -282,6 +286,39 @@ Response:
   "path": ["iberian-peninsula", "west-europe", "central-europe"]
 }
 ```
+
+#### Find Route Region Paths
+
+Finds the region sequence for a multi-waypoint route, using a corridor box around each leg (see [Corridor boxes](#antimeridian-date-line-handling)) rather than single from/to lookups.
+
+- **Endpoint:** `POST /api/v1/region/find-route-region-paths`
+- **Access:** User JWT **or** service client token with `region:query` scope
+
+```bash
+curl --request POST \
+  --url http://localhost:8080/api/v1/region/find-route-region-paths \
+  --header 'content-type: application/json' \
+  --data '{
+    "waypoints": [
+      { "lat": 40.4168, "lon": -3.7038 },
+      { "lat": 48.8566, "lon": 2.3522 }
+    ],
+    "widthKm": 50
+  }'
+```
+
+Response:
+```json
+{
+  "paths": [
+    { "regions": ["iberian-peninsula", "west-europe"] }
+  ]
+}
+```
+
+- `waypoints`: Ordered coordinates describing the route
+- `widthKm`: Corridor width (km) around each leg used to catch nearby regions
+- `paths`: One `regions` sequence per leg between consecutive waypoints
 
 ## Geodata Structure
 
@@ -304,6 +341,48 @@ The geodata directory must be mounted at the path configured by `GEODATA_DIR`. I
 - **Core Region**: Primary coverage area for routing. Points in core regions are routed using that region's Valhalla instance.
 - **Extended Region**: Overlap area that extends into adjacent regions. Used for cross-region routing to ensure seamless transitions.
 
+## Geospatial Behavior
+
+### Antimeridian (date line) handling
+
+Regions whose boundaries cross the 180th meridian are supported. Before any
+exact containment or intersection test, polygon vertices are unwrapped —
+shifted by the multiple of ±360° that brings them closest to the query's
+reference longitude — so a ring spanning the date line is treated as the
+contiguous shape it actually covers instead of a ~360° planar artifact. The
+per-quadrant bounding boxes used for R-tree candidate filtering are unaffected.
+
+- **Point queries** match a date-line-crossing region from either side.
+- **Box queries** that cross the date line (`bottomLeft.lon > topRight.lon`)
+  are split at ±180° and searched on both sides.
+- **Radius queries** wrap their bounding-box corners into [-180, 180], so a
+  circle straddling the date line covers both sides.
+- **Corridor boxes** (`FindRouteRegionPaths`) are computed in an unwrapped
+  longitude space and split into one box per side of the date line, avoiding
+  the ~360° over-approximation a single min/max box would produce.
+
+### Intersection semantics
+
+Region-vs-box and region-vs-circle tests are exact: besides the
+corner/vertex checks, polygon edges are tested against the box boundary
+(Liang–Barsky clipping) and against the circle (equirectangular projection
+plus planar segment distance). Touching the boundary counts as intersecting.
+The circle edge test approximates geodesic distance with an equirectangular
+projection around the circle center; the error is below ~2% for practical
+radii and only matters at the decision boundary.
+
+Regions with axis-aligned vertices (edges exactly on the 0/±180 meridians or
+the 0 parallel) produce zero-area quadrant bounding boxes; these are widened
+to the shape's extent at index time so the region stays queryable.
+
+Widening is skipped for shapes whose longitude extent exceeds 180° (date-line
+straddlers). Their degenerate boxes are bare lines or points on the ±180
+meridian with no queryable area — the area-bearing side always has a
+non-degenerate box — so nothing is lost. Widening them would instead admit
+every query as a candidate against the planar-inconsistent raw ring and
+produce false positives at the opposite meridian, so they are deliberately
+left unexpanded.
+
 ## Building
 
 ```bash
@@ -324,6 +403,19 @@ go run ./cmd/regionservice
 # Build container (from regionservice/ directory)
 make container-build
 ```
+
+### Tagging
+
+Tags are derived from the git state of the checkout:
+
+| Branch / state | Tags applied |
+|----------------|--------------|
+| Version-tagged commit (`v1.2.3`) | `v1.2.3`, `latest` |
+| `main` (untagged) | `v{last}-{date}-dev-b{N}`, `dev-latest` |
+| Other branch | `v{last}-{branch}-b{N}` |
+| Detached HEAD | `v{last}-{sha}-b{N}` |
+
+Non-release builds get an incrementing build number (`-b{N}`) so repeated builds of the same branch don't overwrite each other. The number comes from querying the registry for the highest existing `-b{N}` tag on the same base tag and adding 1; the build fails if the registry can't be reached. Release builds are immutable and never get a build number.
 
 ### FORCE_DEV_LATEST
 

@@ -11,7 +11,8 @@ import (
 	"github.com/paulmach/orb/planar"
 )
 
-// pointSize defines the minimum bounding box size for point queries.
+// pointSize defines the full width/height of the bounding box used for point
+// queries. The box is centered on the query point (half this size per side).
 const pointSize = 0.0001
 
 // RegionResult represents a region found by a spatial query.
@@ -30,7 +31,7 @@ type RegionIndex struct {
 // NewRegionIndex creates a new empty region index with R-trees initialized.
 func NewRegionIndex() *RegionIndex {
 	return &RegionIndex{
-		coreRtree: rtreego.NewTree(2, 10, 25),
+		coreRtree:     rtreego.NewTree(2, 10, 25),
 		extendedRtree: rtreego.NewTree(2, 10, 25),
 	}
 }
@@ -64,13 +65,13 @@ func (i *RegionIndex) Add(
 // SearchByPoint finds all regions containing the given point.
 // If extended is true, also searches extended boundaries.
 // Core matches are returned first, followed by extended-only matches.
+// The containment check unwraps geometry around the point's longitude, so
+// regions crossing the antimeridian match correctly from either side.
 func (i RegionIndex) SearchByPoint(
 	p orb.Point,
 	extended bool,
 ) (res []*RegionResult) {
-	box, _ := rtreego.NewRect(
-		rtreego.Point{p[0], p[1]},
-		[]float64{pointSize, pointSize})
+	box := rtreego.Point{p[0], p[1]}.ToRect(pointSize / 2)
 
 	var coreCands, extCands []rtreego.Spatial
 	coreCands = i.coreRtree.SearchIntersect(box)
@@ -86,14 +87,13 @@ func (i RegionIndex) SearchByPoint(
 		}
 
 		if planar.MultiPolygonContains(
-			sr.Region.CoreShape().Geometry(), p,
+			sr.Region.CoreShape().unwrapIfNeeded(p[0]), p,
 		) {
 			seen[sr.Region.Name()] = struct{}{}
 			res = append(res, &RegionResult{
-				Region: sr.Region,
+				Region:     sr.Region,
 				IsExtended: false,
 			})
-			
 		}
 	}
 	if extended {
@@ -104,11 +104,11 @@ func (i RegionIndex) SearchByPoint(
 			}
 
 			if planar.MultiPolygonContains(
-				sr.Region.ExtendedShape().Geometry(), p,
+				sr.Region.ExtendedShape().unwrapIfNeeded(p[0]), p,
 			) {
 				seen[sr.Region.Name()] = struct{}{}
 				res = append(res, &RegionResult{
-					Region: sr.Region,
+					Region:     sr.Region,
 					IsExtended: true,
 				})
 			}
@@ -183,10 +183,13 @@ func (i RegionIndex) SearchByBox(
 		return res
 	}
 
-	box, _ := rtreego.NewRect(
+	box, err := rtreego.NewRect(
 		rtreego.Point{bottomLeft[0], bottomLeft[1]},
 		[]float64{w, h},
 	)
+	if err != nil {
+		return nil
+	}
 
 	var coreCands, extCands []rtreego.Spatial
 	coreCands = i.coreRtree.SearchIntersect(box)
@@ -200,13 +203,13 @@ func (i RegionIndex) SearchByBox(
 		if _, found := seen[sr.Region.Name()]; found {
 			continue
 		}
-		
+
 		if containsOrIntersectsBox(
 			bottomLeft, topRight, sr.Region, false,
 		) {
 			seen[sr.Region.Name()] = struct{}{}
 			res = append(res, &RegionResult{
-				Region: sr.Region,
+				Region:     sr.Region,
 				IsExtended: false,
 			})
 		}
@@ -217,13 +220,13 @@ func (i RegionIndex) SearchByBox(
 			if _, found := seen[sr.Region.Name()]; found {
 				continue
 			}
-			
+
 			if containsOrIntersectsBox(
 				bottomLeft, topRight, sr.Region, true,
 			) {
 				seen[sr.Region.Name()] = struct{}{}
 				res = append(res, &RegionResult{
-					Region: sr.Region,
+					Region:     sr.Region,
 					IsExtended: true,
 				})
 			}
@@ -249,7 +252,12 @@ func (i RegionIndex) SearchByRadius(
 		geo.PointAtBearingAndDistance(center, 90, radiusMeter)[0],
 		geo.PointAtBearingAndDistance(center, 0, radiusMeter)[1]}
 
-	
+	// Bearing-based corners can fall outside [-180, 180] when the circle
+	// crosses the antimeridian. Normalize them so SearchByBox sees a proper
+	// box and its crossing split handles both sides.
+	bl[0] = wrapLon(bl[0])
+	tr[0] = wrapLon(tr[0])
+
 	cands := i.SearchByBox(bl, tr, extended)
 	for _, rr := range cands {
 		if containsOrIntersectsCircle(
@@ -261,20 +269,73 @@ func (i RegionIndex) SearchByRadius(
 	return
 }
 
+// containsOrIntersectsBox checks if a region intersects with a bounding box.
+// Returns true if any box corner is inside the region, any region vertex is in
+// the box, or any region edge crosses the box boundary.
+func containsOrIntersectsBox(
+	bottomLeft, topRight orb.Point,
+	r *Region,
+	extended bool,
+) bool {
+	var shape *GeoShape
+	if extended {
+		shape = r.ExtendedShape()
+	} else {
+		shape = r.CoreShape()
+	}
+	// Unwrap around the box midpoint so the polygon is longitude-contiguous
+	// in the planar tests below. Box corners are always within 180° of the
+	// midpoint, so they need no adjustment.
+	refLon := (bottomLeft[0] + topRight[0]) / 2
+	geom := shape.unwrapIfNeeded(refLon)
+
+	// 1. A box corner inside the polygon.
+	p0 := bottomLeft
+	p1 := orb.Point{bottomLeft[0], topRight[1]}
+	p2 := topRight
+	p3 := orb.Point{topRight[0], bottomLeft[1]}
+	if planar.MultiPolygonContains(geom, p0) ||
+		planar.MultiPolygonContains(geom, p1) ||
+		planar.MultiPolygonContains(geom, p2) ||
+		planar.MultiPolygonContains(geom, p3) {
+		return true
+	}
+
+	// 2. A polygon vertex inside the box.
+	for _, polygon := range geom {
+		for _, lineString := range polygon {
+			for _, point := range lineString {
+				if point[0] >= bottomLeft[0] && point[0] <= topRight[0] &&
+					point[1] >= bottomLeft[1] && point[1] <= topRight[1] {
+					return true
+				}
+			}
+		}
+	}
+
+	// 3. A polygon edge crossing the box boundary (edge-edge intersection).
+	return polygonIntersectsBox(geom, bottomLeft, topRight)
+}
+
 // containsOrIntersectsCircle checks if a region intersects with a circle.
-// Returns true if the center is inside the region or any vertex is within radius.
+// Returns true if the center is inside the region, any vertex is within
+// radius, or any region edge passes within radius of the center.
 func containsOrIntersectsCircle(
 	center orb.Point,
 	radiusMeters float64,
 	r *Region,
 	extended bool,
 ) bool {
-	var geom orb.MultiPolygon
+	var shape *GeoShape
 	if extended {
-		geom = r.ExtendedShape().Geometry()
+		shape = r.ExtendedShape()
 	} else {
-		geom = r.CoreShape().Geometry()
+		shape = r.CoreShape()
 	}
+	// Unwrap around the center longitude so the center-in-polygon check is
+	// correct for regions crossing the antimeridian. The edge-distance check
+	// self-wraps via its projection, so it is consistent either way.
+	geom := shape.unwrapIfNeeded(center[0])
 
 	if planar.MultiPolygonContains(geom, center) {
 		return true
@@ -289,49 +350,9 @@ func containsOrIntersectsCircle(
 			}
 		}
 	}
-	return false
-}
 
-// containsOrIntersectsBox checks if a region intersects with a bounding box.
-// Returns true if any box corner is inside the region or any region vertex is in the box.
-func containsOrIntersectsBox(
-	bottomLeft, topRight orb.Point,
-	r *Region,
-	extended bool,
-) bool {
-	var geom orb.MultiPolygon
-	if extended {
-		geom = r.ExtendedShape().Geometry()
-	} else {
-		geom = r.CoreShape().Geometry()
-	}
-
-	p0 := bottomLeft;
-	p1 := orb.Point{bottomLeft.X(), topRight.Y()};
-	p2 := topRight;
-	p3 := orb.Point{topRight.X(), bottomLeft.Y()};
-	if (
-			planar.MultiPolygonContains(geom, p0) ||
-			planar.MultiPolygonContains(geom, p1) ||
-			planar.MultiPolygonContains(geom, p2) ||
-			planar.MultiPolygonContains(geom, p3)) {
-		return true
-	}
-
-	for _, polygon := range geom {
-		for _, lineString := range polygon {
-			for _, point := range lineString {
-				if (
-						point.X() >= bottomLeft.X() &&
-						point.X() <= topRight.X() &&
-						point.Y() >= bottomLeft.Y() &&
-						point.Y() <= topRight.Y()) {
-					return true
-				}
-			}
-		}
-	}
-	return false
+	// Any edge passing within radius of the center (edge-circle crossing).
+	return polygonIntersectsCircle(geom, center, radiusMeters)
 }
 
 // parseFeature converts a GeoJSON feature collection to a GeoShape.
@@ -359,17 +380,9 @@ func parseFeature(gj *geojson.FeatureCollection) (*GeoShape, error) {
 		return nil, errors.New("no polygons found")
 	}
 
-	bboxSet := make([]*rtreego.Rect, len(bounds.Boxes()))
-	for i, box := range bounds.Boxes() {
-		if box.Size() == 0 {
-			continue
-		}
-		bounds := box.Bounds()
-		bbox, _  := rtreego.NewRectFromPoints(
-			rtreego.Point{bounds.Min.X(), bounds.Min.Y()},
-			rtreego.Point{bounds.Max.X(), bounds.Max.Y()},
-		)
-		bboxSet[i] = &bbox
+	bboxSet, err := bboxSetFromBounds(bounds)
+	if err != nil {
+		return nil, err
 	}
 
 	return NewGeoShape(multiPoly, bboxSet), nil

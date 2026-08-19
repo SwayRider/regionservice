@@ -4,8 +4,7 @@ package server
 
 import (
 	"context"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
+
 	"github.com/paulmach/orb"
 	regionv1 "github.com/swayrider/protos/region/v1"
 	log "github.com/swayrider/swlib/logger"
@@ -27,11 +26,11 @@ func (s *RegionServer) SearchRadius(
 ) (*regionv1.SearchRadiusResponse, error) {
 	lg := s.Logger().Derive(log.WithFunction("SearchRadius"))
 
-	if req.Location == nil {
-		lg.Debugln("Location must be set")
-		return nil, status.Error(
-			codes.InvalidArgument, "Location must be set",
-		)
+	if err := validateCoordinate(req.Location, "location"); err != nil {
+		return nil, err
+	}
+	if err := validateRadiusKm(req.RadiusKm); err != nil {
+		return nil, err
 	}
 
 	res := s.RegionIndex().SearchByRadius(

@@ -7,6 +7,7 @@ package bootstrap
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/swayrider/regionservice/internal/geodata"
 	"github.com/swayrider/regionservice/internal/index"
@@ -36,6 +37,16 @@ func Bootstrap(
 	}
 
 	for regionName, region := range manifest.Regions {
+		if region.Contour == nil {
+			return fmt.Errorf("region %q: missing contour descriptor", regionName)
+		}
+		if region.Contour.Core == nil {
+			return fmt.Errorf("region %q: missing core contour descriptor", regionName)
+		}
+		if region.Contour.Extended == nil {
+			return fmt.Errorf("region %q: missing extended contour descriptor", regionName)
+		}
+
 		coreDesc := region.Contour.Core
 		coreFC, err := reader.GetContour(ctx, coreDesc)
 		if err != nil {
@@ -53,7 +64,10 @@ func Bootstrap(
 		}
 	}
 
-	for _, crossing := range manifest.Shared.BorderCrossings {
+	for name, crossing := range manifest.Shared.BorderCrossings {
+		if crossing == nil {
+			return fmt.Errorf("border crossing %q: missing descriptor", name)
+		}
 		border, err := reader.GetBorderCrossing(ctx, crossing)
 		if err != nil {
 			return err
