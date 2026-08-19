@@ -287,6 +287,39 @@ Response:
 }
 ```
 
+#### Find Route Region Paths
+
+Finds the region sequence for a multi-waypoint route, using a corridor box around each leg (see [Corridor boxes](#antimeridian-date-line-handling)) rather than single from/to lookups.
+
+- **Endpoint:** `POST /api/v1/region/find-route-region-paths`
+- **Access:** User JWT **or** service client token with `region:query` scope
+
+```bash
+curl --request POST \
+  --url http://localhost:8080/api/v1/region/find-route-region-paths \
+  --header 'content-type: application/json' \
+  --data '{
+    "waypoints": [
+      { "lat": 40.4168, "lon": -3.7038 },
+      { "lat": 48.8566, "lon": 2.3522 }
+    ],
+    "widthKm": 50
+  }'
+```
+
+Response:
+```json
+{
+  "paths": [
+    { "regions": ["iberian-peninsula", "west-europe"] }
+  ]
+}
+```
+
+- `waypoints`: Ordered coordinates describing the route
+- `widthKm`: Corridor width (km) around each leg used to catch nearby regions
+- `paths`: One `regions` sequence per leg between consecutive waypoints
+
 ## Geodata Structure
 
 The geodata directory must be mounted at the path configured by `GEODATA_DIR`. It follows this structure:
@@ -370,6 +403,19 @@ go run ./cmd/regionservice
 # Build container (from regionservice/ directory)
 make container-build
 ```
+
+### Tagging
+
+Tags are derived from the git state of the checkout:
+
+| Branch / state | Tags applied |
+|----------------|--------------|
+| Version-tagged commit (`v1.2.3`) | `v1.2.3`, `latest` |
+| `main` (untagged) | `v{last}-{date}-dev-b{N}`, `dev-latest` |
+| Other branch | `v{last}-{branch}-b{N}` |
+| Detached HEAD | `v{last}-{sha}-b{N}` |
+
+Non-release builds get an incrementing build number (`-b{N}`) so repeated builds of the same branch don't overwrite each other. The number comes from querying the registry for the highest existing `-b{N}` tag on the same base tag and adding 1; the build fails if the registry can't be reached. Release builds are immutable and never get a build number.
 
 ### FORCE_DEV_LATEST
 
